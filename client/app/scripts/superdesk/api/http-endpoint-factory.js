@@ -203,11 +203,12 @@ define(['lodash'], function(_) {
          * @param {Object} item
          * @returns {Promise}
          */
-        HttpEndpoint.prototype.replace = function(dest, item) {
+        HttpEndpoint.prototype.replace = function(item) {
+            var url = item._links.self.href;
             return http({
                 method: 'PUT',
-                url: urls.item(dest),
-                data: item,
+                url: urls.item(url),
+                data: clean(item, !item._links),
                 headers: getHeaders(this, item)
             }).then(function(response) {
                 _.extend(item, response.data);
