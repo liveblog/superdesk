@@ -5,14 +5,20 @@ var openUrl = require('./helpers/utils').open,
     authoring = require('./helpers/authoring');
 
 describe('Master Desk', function() {
-    beforeEach(function(done) {openUrl('/#/desks/').then(done);});
+    beforeEach(function(done) {
+        openUrl('/#/desks/').then(done);
+    });
+
+    function itemHeadline(x, y, z) {
+        return masterDesks.getItem(x, y, z).element(by.css('.headline')).getText();
+    }
 
     it('show content view', function() {
         masterDesks.switchToTab('content');
-        expect(masterDesks.getItem(0, 1, 0).element(by.tagName('span')).getText()).toContain('ITEM3 SLUGLINE');
-        expect(masterDesks.getItem(0, 3, 0).element(by.tagName('span')).getText()).toContain('ITEM4 SLUGLINE');
-        expect(masterDesks.getItem(1, 1, 0).element(by.tagName('span')).getText()).toContain('ITEM5 SLUGLINE');
-        expect(masterDesks.getItem(1, 2, 0).element(by.tagName('span')).getText()).toContain('ITEM6 SLUGLINE');
+        expect(itemHeadline(0, 1, 0)).toBe('item3');
+        expect(itemHeadline(0, 3, 0)).toBe('item4');
+        expect(itemHeadline(1, 1, 0)).toBe('item5');
+        expect(itemHeadline(1, 2, 0)).toBe('item6');
     });
 
     it('show content view - preview item', function() {
@@ -63,23 +69,30 @@ describe('Master Desk', function() {
 
     it('show user role view all users', function() {
         masterDesks.switchToTab('users');
-        expect(masterDesks.getUser(0, 0, 0).element(by.className('text')).getText()).toContain('first name last name');
-        expect(masterDesks.getUser(0, 1, 0).element(by.className('text')).getText()).toContain('first name2 last name2');
-        expect(masterDesks.getUser(0, 1, 1).element(by.className('text')).getText()).toContain('first name3 last name3');
-        expect(masterDesks.getUser(0, 2, 0).element(by.className('text')).getText()).toContain('first name1 last name1');
-        expect(masterDesks.getUser(1, 2, 0).element(by.className('text')).getText()).toContain('first name1 last name1');
+        expect(masterDesks.getUser(0, 1, 0).element(by.className('text')).getText())
+            .toContain('first name last name');
+        expect(masterDesks.getUser(0, 2, 0).element(by.className('text')).getText())
+            .toContain('first name1 last name1');
+        expect(masterDesks.getUser(0, 3, 0).element(by.className('text')).getText())
+            .toContain('first name2 last name2');
+        expect(masterDesks.getUser(0, 3, 1).element(by.className('text')).getText())
+            .toContain('first name3 last name3');
+        expect(masterDesks.getUser(1, 2, 0).element(by.className('text')).getText())
+            .toContain('first name1 last name1');
     });
 
     it('show user role view online users', function() {
         masterDesks.switchToTab('users');
         masterDesks.toggleOnlineUsers();
-        expect(masterDesks.getUser(0, 0, 0).element(by.className('text')).getText()).toContain('first name last name');
-        expect(masterDesks.getUser(1, 0, 0).element(by.className('text')).getText()).toContain('first name last name');
-        expect(masterDesks.getUsersCount(0, 0)).toBe(1);
-        expect(masterDesks.getUsersCount(0, 1)).toBe(0);
+        expect(masterDesks.getUser(0, 1, 0).element(by.className('text')).getText())
+            .toContain('first name last name');
+        expect(masterDesks.getUser(1, 1, 0).element(by.className('text')).getText())
+            .toContain('first name last name');
+        expect(masterDesks.getUsersCount(0, 0)).toBe(0);
+        expect(masterDesks.getUsersCount(0, 1)).toBe(1);
         expect(masterDesks.getUsersCount(0, 2)).toBe(0);
-        expect(masterDesks.getUsersCount(1, 0)).toBe(1);
-        expect(masterDesks.getUsersCount(1, 1)).toBe(0);
+        expect(masterDesks.getUsersCount(1, 0)).toBe(0);
+        expect(masterDesks.getUsersCount(1, 1)).toBe(1);
     });
 
     it('user role view - show desk', function() {
@@ -97,7 +110,7 @@ describe('Master Desk', function() {
 
     it('user role view - edit user', function() {
         masterDesks.switchToTab('users');
-        masterDesks.editUser(0, 0, 0);
+        masterDesks.editUser(0, 1, 0);
         browser.sleep(200);
         expect(element(by.className('modal-content')).isDisplayed()).toBe(true);
     });

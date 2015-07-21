@@ -45,8 +45,8 @@ class WENNTestCase(unittest.TestCase):
                          ' allegations of aggravated assault.')
 
     def test_anpa_category(self):
-        self.assertEqual(self.items[0].get('anpa-category')['qcode'], 'e')
-        self.assertEqual(self.items[1].get('anpa-category')['qcode'], 'e')
+        self.assertEqual(self.items[0].get('anpa_category')[0]['qcode'], 'e')
+        self.assertEqual(self.items[1].get('anpa_category')[0]['qcode'], 'e')
 
     def test_subject(self):
         self.assertEqual(self.items[0].get('subject')[0]['qcode'], '01000000')
@@ -66,7 +66,7 @@ class WENNTestCase(unittest.TestCase):
 
     def test_item_defaults(self):
         self.assertEqual(self.items[0].get('pubstatus'), 'usable')
-        self.assertEqual(self.items[0].get('urgency'), '5')
+        self.assertEqual(self.items[0].get('urgency'), 5)
         self.assertEqual(self.items[0].get('type'), 'text')
 
     def test_guid(self):

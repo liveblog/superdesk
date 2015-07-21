@@ -87,14 +87,12 @@ function TasksController($scope, $timeout, api, notify, desks, tasks) {
 
     function fetchTasks() {
         $timeout.cancel(timeout);
-        timeout = $timeout(fetch, 300, false);
-    }
-
-    function fetch() {
-        var status = $scope.view === KANBAN_VIEW ? null : $scope.activeStatus;
-        tasks.fetch(status).then(function(list) {
-            $scope.tasks = list;
-        });
+        timeout = $timeout(function() {
+            var status = $scope.view === KANBAN_VIEW ? null : $scope.activeStatus;
+            tasks.fetch(status).then(function(list) {
+                $scope.tasks = list;
+            });
+        }, 300, false);
     }
 
     $scope.preview = function(item) {
@@ -265,9 +263,9 @@ function StagesCtrlFactory(api, desks) {
             };
 
             $scope.$watch(function() {
-                return desks.activeDeskId;
+                return desks.getCurrentDeskId();
             }, function() {
-                self.reload(desks.activeDeskId);
+                self.reload(desks.getCurrentDeskId());
             });
         });
     };

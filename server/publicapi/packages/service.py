@@ -22,3 +22,39 @@ class PackagesService(ItemsService):
 
     Serves mainly as a proxy to the data layer.
     """
+
+    def on_fetched_item(self, document):
+        """Event handler when a single package is retrieved from database.
+
+        It sets the `uri` field for all associated (referenced) objects.
+
+        :param dict document: fetched MongoDB document representing the package
+        """
+        self._process_referenced_objects(document)
+        super().on_fetched_item(document)
+
+    def on_fetched(self, result):
+        """Event handler when a collection of packages is retrieved from
+        database.
+
+        For each package in the fetched collection it sets the `uri` field for
+        all objects associated with (referenced by) the package.
+
+        :param dict result: dictionary contaning the list of MongoDB documents
+            (the fetched packages) and some metadata, e.g. pagination info
+        """
+        for document in result['_items']:
+            self._process_referenced_objects(document)
+        super().on_fetched(result)
+
+    def _process_referenced_objects(self, document):
+        """Do some processing on the objects referenced by `document`.
+
+        For all referenced objects their `uri` field is generated and their
+        `_id` field removed.
+
+        :param dict document: MongoDB document representing a package object
+        """
+        for name, target_obj in document.get('associations', {}).items():
+            target_obj['uri'] = self._get_uri(target_obj)
+            del target_obj['_id']

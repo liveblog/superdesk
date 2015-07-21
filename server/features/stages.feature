@@ -236,7 +236,7 @@ Feature: Stages
         Then we get content expiry 20
         Then we get notifications
         """
-        [{"event": "stage", "extra": {"updated": 1, "desk_id": "#desks._id#", "stage_id": "#stages._id#", "is_visible": true}}]
+        [{"event": "stage", "extra": {"updated": 1, "desk_id": "#desks._id#", "stage_id": "#stages._id#"}}]
         """
 
     @auth @notification
@@ -404,7 +404,7 @@ Feature: Stages
         "is_visible" : true
         }
         """
-        Then we get response code 201
+        When we reset notifications
         When we patch "/stages/#stages._id#"
         """
         {"is_visible" : false}
@@ -412,7 +412,7 @@ Feature: Stages
         Then we get response code 200
         Then we get notifications
         """
-        [{"event": "stage", "extra": {"updated": 1, "desk_id": "#desks._id#", "stage_id": "#stages._id#", "is_visible": false}}]
+        [{"event": "stage_visibility_updated", "extra": {"updated": 1, "desk_id": "#desks._id#", "stage_id": "#stages._id#", "is_visible": false}}]
         """
 
 

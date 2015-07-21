@@ -26,7 +26,7 @@ Feature: News Items Archive
         [{"guid": "tag:example.com,0000:newsml_BRE9A605", "state": "published"}]
         """
 
-        When we get "/archive/tag:example.com,0000:newsml_BRE9A605"
+        When we get "/archive"
         Then we get list with 0 items
 
     @auth
@@ -47,9 +47,9 @@ Feature: News Items Archive
         """
 
         Then we get updated response
-            """
-            {"word_count": 2}
-            """
+        """
+        {"word_count": 2, "operation": "update"}
+        """
         And we get version 3
         And we get etag matching "/archive/xyz"
 
@@ -88,8 +88,12 @@ Feature: News Items Archive
         {"headline": "TEST 2", "urgency": 2}
         """
 		And we restore version 1
-        Then we get version 3
-        Then we get global content expiry
+        Then we get updated response
+        """
+        {"operation": "restore"}
+        """
+        And we get version 3
+        And we get global content expiry
         And the field "headline" value is "test"
 
 
@@ -99,7 +103,7 @@ Feature: News Items Archive
         When we upload a file "bike.jpg" to "archive"
         Then we get new resource
         """
-        {"guid": "", "firstcreated": "", "versioncreated": "", "state": "draft"}
+        {"guid": "__any_value__", "firstcreated": "__any_value__", "versioncreated": "__any_value__", "state": "draft"}
         """
         And we get "bike.jpg" metadata
         And we get "picture" renditions
@@ -120,7 +124,7 @@ Feature: News Items Archive
         When we upload a file "green.ogg" to "archive"
         Then we get new resource
         """
-        {"guid": "", "state": "draft"}
+        {"guid": "__any_value__", "state": "draft"}
         """
         And we get "green.ogg" metadata
         Then original rendition is updated with link to file having mimetype "audio/ogg"
@@ -140,7 +144,7 @@ Feature: News Items Archive
         When we upload a file "this_week_nasa.mp4" to "archive"
         Then we get new resource
         """
-        {"guid": "", "state": "draft"}
+        {"guid": "__any_value__", "state": "draft"}
         """
         And we get "this_week_nasa.mp4" metadata
         Then original rendition is updated with link to file having mimetype "video/mp4"
@@ -200,7 +204,10 @@ Feature: News Items Archive
         """
         Then we get new resource
         """
-        {"_id": "", "guid": "", "type": "text", "original_creator": "", "word_count": 1}
+        {
+        	"_id": "__any_value__", "guid": "__any_value__", "type": "text",
+        	"original_creator": "__any_value__", "word_count": 1, "operation": "create"
+        }
         """
 
 	@auth
@@ -236,11 +243,11 @@ Feature: News Items Archive
         """
         {"word_count" : "6", "keywords" : ["Test"], "urgency" : "4", "byline" : "By Line", "language": "en",
          "dateline" : "Sydney, Aus (Nov 12, 2014) AAP - ", "genre" : [{"name": "Test"}],
-         "anpa-category" :
-            {
+         "anpa_category" :
+            [{
                 "qcode" : "A",
                 "name" : "Australian News"
-            },
+            }],
          "subject" : [
             {
                 "qcode" : "11007000",
@@ -328,7 +335,7 @@ Feature: News Items Archive
         When we upload a file "bike.jpg" to "archive"
         Then we get new resource
         """
-        {"guid": "", "firstcreated": "", "versioncreated": "", "state": "draft"}
+        {"guid": "__any_value__", "firstcreated": "__any_value__", "versioncreated": "__any_value__", "state": "draft"}
         """
         When we patch latest
         """

@@ -1,7 +1,10 @@
 <div class="metadata-view">
     <dl>
         <dt translate>State</dt>
-        <dd><div class="state-label state-{{item.state}}">{{item.state}}</div></dd>
+        <dd>
+            <div class="state-label state-{{item.state}}">{{item.state}}</div>
+            <div ng-if="item.marked_for_not_publication" class="state-label not-for-publication" translate>Not For Publication</div>
+        </dd>
     </dl>
     <dl ng-if="item.guid">
         <dt translate>GUID</dt>
@@ -15,9 +18,9 @@
         <dt translate>Type</dt>
         <dd>{{ item.type }}</dd>
     </dl>
-    <dl ng-if="item._version">
+    <dl ng-if="item._current_version">
         <dt translate>Version</dt>
-        <dd>{{ item._version }}</dd>
+        <dd>{{ item._current_version }}</dd>
     </dl>
 
     <dl ng-if="item.firstcreated">
@@ -40,6 +43,10 @@
         <dt translate>Version creator</dt>
         <dd>{{ versionCreator }}</dd>
     </dl>
+    <dl ng-if="item.sign_off">
+        <dt translate>Sign-off</dt>
+        <dd>{{ item.sign_off }}</dd>
+    </dl>
 
     <!-- ingest details -->
     <dl ng-if="item.original_source">
@@ -54,7 +61,6 @@
         <dt translate>Ingest provider sequence</dt>
         <dd>{{ item.ingest_provider_sequence }}</dd>
     </dl>
-
     <!-- copyright details details -->
     <dl ng-if="item.copyrightholder">
         <dt translate>Copyright holder</dt>
@@ -70,9 +76,9 @@
     </dl>
 
     <!-- category details -->
-    <dl ng-if="item['anpa-category']">
+    <dl ng-if="item['anpa_category']">
         <dt translate>ANPA category</dt>
-        <dd>{{ item['anpa-category'].name }}</dd>
+        <dd>{{ item['anpa_category'] | mergeWords:'name' }}</dd>
     </dl>
     <dl ng-if="item.subject && item.subject.length > 0">
         <dt translate>Subject</dt>
@@ -90,11 +96,15 @@
         <dt translate>Dateline</dt>
         <dd>{{ item.dateline }}</dd>
     </dl>
-        <dl ng-if="item.located">
+    <dl ng-if="item.located">
         <dt translate>Located</dt>
         <dd>{{ item.located }}</dd>
     </dl>
 
+    <dl ng-if="item.targeted_for">
+        <dt translate>Targeted For</dt>
+        <dd>{{item.targeted_for | mergeTargets}}</dd>
+    </dl>
 
     <!-- Story details -->
     <dl ng-if="item.language">
@@ -129,21 +139,13 @@
         <dt translate>Signal</dt>
         <dd>{{ item.signal }}</dd>
     </dl>
-    <dl ng-if="item.bydlne">
+    <dl ng-if="item.byline">
         <dt translate>Byline</dt>
         <dd>{{ item.byline }}</dd>
     </dl>
     <dl ng-if="item.located">
         <dt translate>Location</dt>
         <dd>{{ item.located }}</dd>
-    </dl>
-
-    <!-- publish data -->
-    <dl ng-if="destinationGroups">
-        <dt translate>Destination Groups</dt>
-        <dd ng-repeat="destinationGroup in destinationGroups">
-            {{destinationGroup.name}}
-        </dd>
     </dl>
 
     <!-- publish schedule data -->

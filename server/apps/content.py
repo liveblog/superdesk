@@ -8,6 +8,7 @@
 # AUTHORS and LICENSE files distributed with this source code, or
 # at https://www.sourcefabric.org/superdesk/license
 
+from collections import namedtuple
 
 import superdesk
 from superdesk.resource import Resource
@@ -18,8 +19,12 @@ PACKAGE_TYPE = 'package_type'
 TAKES_PACKAGE = 'takes'
 ITEM_TYPE = 'type'
 ITEM_TYPE_COMPOSITE = 'composite'
+LAST_TAKE = 'last_take'
 
 not_analyzed = {'type': 'string', 'index': 'not_analyzed'}
+
+pub_status = ['usable', 'withhold', 'canceled']
+PUB_STATUS = namedtuple('PUBSTATUS', ['USABLE', 'HOLD', 'CANCELED'])(*pub_status)
 
 metadata_schema = {
     # Identifiers
@@ -91,8 +96,9 @@ metadata_schema = {
     },
 
     # Category Details
-    'anpa-category': {
-        'type': 'dict',
+    'anpa_category': {
+        'type': 'list',
+        'nullable': True,
         'mapping': {
             'type': 'object',
             'properties': {
@@ -184,8 +190,8 @@ metadata_schema = {
     },
     'pubstatus': {
         'type': 'string',
-        'allowed': ['usable', 'withhold', 'canceled'],
-        'default': 'usable',
+        'allowed': pub_status,
+        'default': PUB_STATUS.USABLE,
         'mapping': not_analyzed
     },
     'signal': {

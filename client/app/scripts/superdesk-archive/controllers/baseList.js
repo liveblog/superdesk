@@ -23,9 +23,13 @@ define(['lodash'], function(_) {
             }
             if ($location.search().fetch) {
                 self.fetchItem(decodeURIComponent($location.search().fetch))
-                .then(function() {
+                .then(function(item) {
                     $scope.selected.preview = null;
+                    $scope.selected.fetch = item;
                 });
+            }
+            if (!$location.search().fetch) {
+                $scope.selected.fetch = null;
             }
         });
 
@@ -34,10 +38,10 @@ define(['lodash'], function(_) {
             var query = search.query(params);
 
             if (filterDesk) {
-                if (desks.getCurrentStageId()) {
-                    query.filter({term: {'task.stage': desks.getCurrentStageId()}});
-                } else if (desks.getCurrentDeskId()) {
-                    query.filter({term: {'task.desk': desks.getCurrentDeskId()}});
+                if (desks.active.stage) {
+                    query.filter({term: {'task.stage': desks.active.stage}});
+                } else if (desks.active.desk) {
+                    query.filter({term: {'task.desk': desks.active.desk}});
                 }
             }
 

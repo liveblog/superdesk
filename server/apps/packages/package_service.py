@@ -9,20 +9,22 @@
 # at https://www.sourcefabric.org/superdesk/license
 
 import logging
+from eve.versioning import resolve_document_version
 from settings import DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES
 import superdesk
-
 from collections import Counter
-from eve.utils import config
+from eve.utils import config, ParsedRequest
 from eve.validation import ValidationError
 from superdesk.errors import SuperdeskApiError
 from superdesk import get_resource_service
-from apps.content import LINKED_IN_PACKAGES, PACKAGE_TYPE, TAKES_PACKAGE, PACKAGE
-from apps.archive.common import ASSOCIATIONS, ITEM_REF, ID_REF, MAIN_GROUP, ROOT_GROUP
-
+from apps.content import LINKED_IN_PACKAGES, PACKAGE_TYPE, TAKES_PACKAGE, PACKAGE, LAST_TAKE
+from apps.archive.common import ASSOCIATIONS, ITEM_REF, ID_REF, MAIN_GROUP, \
+    ROOT_GROUP, insert_into_versions, SEQUENCE
+from apps.archive.archive import SOURCE as ARCHIVE
+from superdesk.utc import utcnow
 
 logger = logging.getLogger(__name__)
-package_create_signal = superdesk.signals.signal('package.create')
+package_create_signal = superdesk.signals.signal('package.create')  # @UndefinedVariable
 
 
 def create_root_group(docs):
@@ -55,7 +57,6 @@ def get_item_ref(item):
 
 
 class PackageService():
-
     def on_create(self, docs):
         create_root_group(docs)
         self.check_root_group(docs)
@@ -181,14 +182,8 @@ class PackageService():
                 data.update({PACKAGE_TYPE: TAKES_PACKAGE})
             two_way_links.append(data)
 
-        updates = self.get_item_update_data(item, two_way_links, delete)
+        updates = {LINKED_IN_PACKAGES: two_way_links}
         get_resource_service(endpoint).system_update(item_id, updates, item)
-
-    """
-    Add extensibility point for item patch data.
-    """
-    def get_item_update_data(self, __item, links, delete):
-        return {LINKED_IN_PACKAGES: links}
 
     def check_for_duplicates(self, package, associations):
         counter = Counter()
@@ -211,6 +206,86 @@ class PackageService():
             logger.error(message)
             raise ValidationError(message)
 
+    def get_packages(self, doc_id):
+        """
+        Retrieves if an article identified by doc_id is referenced in a package.
+        :return: articles of type composite
+        """
+
+        query = {'$and': [{'type': 'composite'}, {'groups.refs.guid': doc_id}]}
+
+        request = ParsedRequest()
+        request.max_results = 100
+
+        return get_resource_service(ARCHIVE).get_from_mongo(req=request, lookup=query)
+
+    def remove_refs_in_package(self, package, ref_id_to_remove, processed_packages=None):
+        """
+        Removes residRef referenced by ref_id_to_remove from the package associations and returns the package id.
+        Before removing checks if the package has been processed. If processed the package is skipped.
+        In case of takes package, sequence is decremented and last_take field is updated.
+        If sequence is zero then the takes package is deleted.
+        :return: package[config.ID_FIELD]
+        """
+        groups = package['groups']
+
+        if processed_packages is None:
+            processed_packages = []
+
+        sub_package_ids = [ref['guid'] for group in groups for ref in group['refs'] if ref.get('type') == 'composite']
+        for sub_package_id in sub_package_ids:
+            if sub_package_id not in processed_packages:
+                sub_package = self.find_one(req=None, _id=sub_package_id)
+                return self.remove_refs_in_package(sub_package, ref_id_to_remove)
+
+        new_groups = [{'id': group['id'], 'role': group.get('role'),
+                       'refs': [ref for ref in group['refs'] if ref.get('guid') != ref_id_to_remove]}
+                      for group in groups]
+        new_root_refs = [{'idRef': group['id']} for group in new_groups if group['id'] != 'root']
+
+        for group in new_groups:
+            if group['id'] == 'root':
+                group['refs'] = new_root_refs
+                break
+
+        updates = {config.LAST_UPDATED: utcnow(), 'groups': new_groups}
+
+        # if takes package then adjust the reference.
+        # safe to do this as take can only be in one takes package.
+        delete_package = False
+        if package.get(PACKAGE_TYPE) == TAKES_PACKAGE:
+            new_sequence = package[SEQUENCE] - 1
+            if new_sequence == 0:
+                # remove the takes package.
+                get_resource_service(ARCHIVE).delete_action({config.ID_FIELD: package[config.ID_FIELD]})
+                delete_package = True
+            else:
+                updates[SEQUENCE] = new_sequence
+                last_take_group = next(reference for reference in
+                                       next(new_group.get('refs') for new_group in new_groups if
+                                            new_group['id'] == 'main')
+                                       if reference.get(SEQUENCE) == new_sequence)
+
+                if last_take_group:
+                    updates[LAST_TAKE] = last_take_group.get(ITEM_REF)
+
+        if not delete_package:
+            resolve_document_version(updates, ARCHIVE, 'PATCH', package)
+            get_resource_service(ARCHIVE).patch(package[config.ID_FIELD], updates)
+            insert_into_versions(id_=package[config.ID_FIELD])
+
+        sub_package_ids.append(package[config.ID_FIELD])
+        return sub_package_ids
+
     def _get_associations(self, doc):
         return [assoc for group in doc.get('groups', [])
                 for assoc in group.get(ASSOCIATIONS, [])]
+
+    def remove_spiked_refs_from_package(self, doc_id):
+        packages = self.get_packages(doc_id)
+        if packages.count() > 0:
+            processed_packages = []
+            for package in packages:
+                if str(package[config.ID_FIELD]) not in processed_packages:
+                    processed_packages.extend(
+                        self.remove_refs_in_package(package, doc_id, processed_packages))

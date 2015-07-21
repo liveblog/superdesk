@@ -8,11 +8,19 @@ define([
 ], function(angular, d3, moment, BaseListController) {
     'use strict';
 
+    angular.module('superdesk.ingest.send', [
+        'superdesk.api',
+        'superdesk.desks'
+        ])
+        .service('send', SendService)
+        ;
+
     var app = angular.module('superdesk.ingest', [
         'superdesk.search',
         'superdesk.dashboard',
         'superdesk.widgets.ingest',
-        'superdesk.widgets.ingeststats'
+        'superdesk.widgets.ingeststats',
+        'superdesk.ingest.send'
     ]);
 
     app.value('providerTypes', {
@@ -49,7 +57,8 @@ define([
             templateUrl: 'scripts/superdesk-ingest/views/settings/aapConfig.html'
         },
         search: {
-            label: 'Search provider'
+            label: 'Search provider',
+            templateUrl: 'scripts/superdesk-ingest/views/settings/searchConfig.html'
         }
     });
 
@@ -204,10 +213,7 @@ define([
         };
 
         this.fetchItem = function(id) {
-            return api.ingest.getById(id)
-            .then(function(item) {
-                $scope.selected.fetch = item;
-            });
+            return api.ingest.getById(id);
         };
 
         var oldQuery = _.omit($location.search(), '_id');
@@ -304,13 +310,52 @@ define([
                                 .style('fill', function(d) { return colorScale(d.data.key); });
 
                             g.append('text')
+                                .attr('class', 'place-label')
                                 .attr('transform', function(d) { return 'translate(' + arc.centroid(d) + ')'; })
                                 .style('text-anchor', 'middle')
                                 .style('fill', colorScheme.text)
                                 .text(function(d) { return d.data.key; });
+
+                            arrangeLabels();
                         }
 
                     });
+                    function arrangeLabels() {
+                        var move = 1;
+                        while (move > 0) {
+                            move = 0;
+                            svg.selectAll('.place-label')
+                                    .each(rerangeLabels);
+                        }
+                        function rerangeLabels() {
+                            /*jshint validthis: true */
+                            var self = this,
+                                    a = self.getBoundingClientRect();
+
+                            svg.selectAll('.place-label')
+                                    .each(function () {
+                                        if (this !== self) {
+                                            var b = this.getBoundingClientRect();
+                                            if ((Math.abs(a.left - b.left) * 2 < (a.width + b.width)) &&
+                                                    (Math.abs(a.top - b.top) * 2 < (a.height + b.height))) {
+
+                                                var dx = (Math.max(0, a.right - b.left) +
+                                                        Math.min(0, a.left - b.right)) * 0.01,
+                                                        dy = (Math.max(0, a.bottom - b.top) +
+                                                                Math.min(0, a.top - b.bottom)) * 0.02,
+                                                        tt = d3.transform(d3.select(this).attr('transform')),
+                                                        to = d3.transform(d3.select(self).attr('transform'));
+                                                move += Math.abs(dx) + Math.abs(dy);
+                                                to.translate = [to.translate[0] + dx, to.translate[1] + dy];
+                                                tt.translate = [tt.translate[0] - dx, tt.translate[1] - dy];
+                                                d3.select(this).attr('transform', 'translate(' + tt.translate + ')');
+                                                d3.select(self).attr('transform', 'translate(' + to.translate + ')');
+                                                a = this.getBoundingClientRect();
+                                            }
+                                        }
+                                    });
+                        }
+                    }
                 });
             }
         };
@@ -352,14 +397,6 @@ define([
                         });
                 }
 
-                function fetchSourceErrors(source_type) {
-                    return api('ingest_errors').query({'source_type': source_type})
-                        .then(function(result) {
-                            $scope.provider.source_errors = result._items[0].source_errors;
-                            $scope.provider.all_errors = result._items[0].all_errors;
-                        });
-                }
-
                 function openProviderModal() {
                     var provider_id = $location.search()._id;
                     var provider;
@@ -393,6 +430,16 @@ define([
                 api('routing_schemes').query().then(function(result) {
                     $scope.routingScheme = result._items;
                 });
+
+                $scope.fetchSourceErrors = function() {
+                    if ($scope.provider && $scope.provider.type) {
+                        return api('io_errors').query({'source_type': $scope.provider.type})
+                            .then(function (result) {
+                                $scope.provider.source_errors = result._items[0].source_errors;
+                                $scope.provider.all_errors = result._items[0].all_errors;
+                            });
+                    }
+                };
 
                 $scope.remove = function(provider) {
                     modal.confirm(gettext('Are you sure you want to delete Ingest Source?')).then(
@@ -444,10 +491,6 @@ define([
                             return !(fieldName in aliasObj);
                         }
                     );
-
-                    if (provider && provider.type) {
-                        fetchSourceErrors(provider.type);
-                    }
                 };
 
                 $scope.cancel = function() {
@@ -966,10 +1009,6 @@ define([
 
                 scope.addFetch = function() {
                     if (scope.newFetch.desk && scope.newFetch.stage) {
-                        if (scope.newFetch.destination_groups) {
-                            var destinationGroups = _.pluck(scope.newFetch.destination_groups, '_id');
-                            scope.newFetch.destination_groups = destinationGroups;
-                        }
                         scope.rule.actions.fetch.push(scope.newFetch);
                         scope.newFetch = {};
                     }
@@ -983,10 +1022,6 @@ define([
 
                 scope.addPublish = function() {
                     if (scope.newPublish.desk && scope.newPublish.stage) {
-                        if (scope.newPublish.destination_groups) {
-                            var destinationGroups = _.pluck(scope.newPublish.destination_groups, '_id');
-                            scope.newPublish.destination_groups = destinationGroups;
-                        }
                         scope.rule.actions.publish.push(scope.newPublish);
                         scope.newPublish = {};
                     }
@@ -1304,8 +1339,8 @@ define([
             .activity('fetchAs', {
                 label: gettext('Fetch As'),
                 icon: 'archive',
-                controller: ['$location', 'data', function($location, data) {
-                    $location.search('fetch', data.item._id);
+                controller: ['data', 'send', function(data, send) {
+                    send.allAs([data.item]);
                 }],
                 filters: [
                     {action: 'list', type: 'ingest'}
@@ -1316,25 +1351,18 @@ define([
                 label: gettext('Fetch'),
                 icon: 'archive',
                 monitor: true,
-                controller: ['api', 'data', 'desks', function(api, data, desks) {
-                    api
-                        .save('fetch', {}, {desk: desks.getCurrentDeskId()}, data.item)
-                        .then(
-                            function(archiveItem) {
-                                data.item.task_id = archiveItem.task_id;
-                                data.item.archived = archiveItem._created;
-                            }, function(response) {
-                                data.item.error = response;
-                            })
-                    ['finally'](function() {
-                        data.item.actioning.archive = false;
-                    });
+                controller: ['send', 'data', function(send, data) {
+                    return send.one(data.item);
                 }],
                 filters: [
                     {action: 'list', type: 'ingest'}
                 ],
                 privileges: {fetch: 1},
-                key: 'f'
+                key: 'f',
+                additionalCondition: ['desks', function (desks) {
+                    // fetching to 'personal' desk is not allowed
+                    return desks.getCurrentDeskId() != null;
+                }]
             })
             .activity('externalsource', {
                 label: gettext('Get from external source'),
@@ -1403,5 +1431,113 @@ define([
         });
     }]);
 
+    SendService.$inject = ['desks', 'api', '$q'];
+    function SendService(desks, api, $q) {
+        this.one = sendOne;
+        this.all = sendAll;
+
+        this.oneAs = sendOneAs;
+        this.allAs = sendAllAs;
+
+        this.config = null;
+        this.getConfig = getConfig;
+
+        var vm = this;
+
+        /**
+         * Send given item to a current user desk
+         *
+         * @param {Object} item
+         * @returns {Promise}
+         */
+        function sendOne(item) {
+            return api
+                .save('fetch', {}, {desk: desks.getCurrentDeskId()}, item)
+                .then(
+                    function(archiveItem) {
+                        item.task_id = archiveItem.task_id;
+                        item.archived = archiveItem._created;
+                    }, function(response) {
+                        item.error = response;
+                    })
+                ['finally'](function() {
+                    item.actioning.archive = false;
+                });
+        }
+
+        /**
+         * Send all given items to current user desk
+         *
+         * @param {Array} items
+         */
+        function sendAll(items) {
+            angular.forEach(items, sendOne);
+        }
+
+        /**
+         * Send given item using config
+         *
+         * @param {Object} item
+         * @param {Object} config
+         * @param {string} config.desk - desk id
+         * @param {string} config.stage - stage id
+         * @param {string} config.macro - macro name
+         * @returns {Promise}
+         */
+        function sendOneAs(item, config) {
+            var data = getData(config);
+            return api.save('fetch', {}, data, item).then(function(archived) {
+                item.archived = archived._created;
+                return archived;
+            });
+
+            function getData(config) {
+                var data = {
+                    desk: config.desk
+                };
+
+                if (config.stage) {
+                    data.stage = config.stage;
+                }
+
+                if (config.macro) {
+                    data.macro = config.macro;
+                }
+
+                return data;
+            }
+        }
+
+        /**
+         * Send all given item using config once it's resolved
+         *
+         * At first it only creates a deferred config which is
+         * picked by SendItem directive, once used sets the destination
+         * it gets resolved and items are sent.
+         *
+         * @param {Array} items
+         * @return {Promise}
+         */
+        function sendAllAs(items) {
+            vm.config = $q.defer();
+            return vm.config.promise.then(function(config) {
+                vm.config = null;
+                return $q.all(items.map(function(item) {
+                    return sendOneAs(item, config);
+                }));
+            });
+        }
+
+        /**
+         * Get deffered config if any. Used in $watch
+         *
+         * @returns {Object|null}
+         */
+        function getConfig() {
+            return vm.config;
+        }
+    }
+
     return app;
+
 });

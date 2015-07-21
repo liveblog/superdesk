@@ -22,9 +22,14 @@ Feature: Copy Content in Personal Workspace
       """
       {}
       """
-      Then we get "_id"
-      When we get "/archive/#_id#?version=all"
-      Then we get list with 3 items
+      When we get "/archive/#copy._id#"
+      Then we get existing resource
+      """
+      {"state": "draft"}
+      """
+      And we get version 4
+      When we get "/archive/#copy._id#?version=all"
+      Then we get list with 4 items
       When we get "/archive/"
       Then we get list with 2 items
 

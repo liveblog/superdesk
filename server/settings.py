@@ -21,6 +21,8 @@ try:
 except ImportError:
     from urlparse import urlparse
 
+from publicapi.settings import PUBLICAPI_MONGO_DBNAME  # noqa @UnusedImport
+
 
 def env(variable, fallback_value=None):
     env_value = os.environ.get(variable, '')
@@ -60,20 +62,11 @@ X_DOMAINS = '*'
 X_MAX_AGE = 24 * 3600
 X_HEADERS = ['Content-Type', 'Authorization', 'If-Match']
 
-
-MONGO_ENABLE_MULTI_DBS = False
 MONGO_DBNAME = env('MONGO_DBNAME', 'superdesk')
-if env('MONGOLAB_URI'):
-    MONGO_URI = env('MONGOLAB_URI')
-elif env('MONGODB_PORT'):
-    MONGO_URI = '{0}/{1}'.format(env('MONGODB_PORT').replace('tcp:', 'mongodb:'), MONGO_DBNAME)
-
+MONGO_URI = env('MONGO_URI', 'mongodb://localhost/%s' % MONGO_DBNAME)
 LEGAL_ARCHIVE_DBNAME = env('LEGAL_ARCHIVE_DBNAME', 'legal_archive')
-if env('LEGAL_ARCHIVE_URI'):
-    LEGAL_ARCHIVE_URI = env('LEGAL_ARCHIVE_URI')
-elif env('LEGAL_ARCHIVEDB_PORT'):
-    LEGAL_ARCHIVE_URI = '{0}/{1}'.format(env('LEGAL_ARCHIVEDB_PORT').replace('tcp:', 'mongodb:'),
-                                         LEGAL_ARCHIVE_DBNAME)
+LEGAL_ARCHIVE_URI = env('LEGAL_ARCHIVE_URI')
+PUBLICAPI_MONGO_URI = env('PUBLICAPI_MONGO_URI')
 
 ELASTICSEARCH_URL = env('ELASTICSEARCH_URL', 'http://localhost:9200')
 ELASTICSEARCH_INDEX = env('ELASTICSEARCH_INDEX', 'superdesk')
@@ -122,7 +115,7 @@ CELERYBEAT_SCHEDULE = {
     'publish:remove_expired': {
         'task': 'apps.publish.content_purge',
         'schedule': crontab(minute=30)
-    }
+    },
 }
 
 SENTRY_DSN = env('SENTRY_DSN')
@@ -135,7 +128,6 @@ INSTALLED_APPS = [
     'superdesk.notification',
     'superdesk.activity',
     'superdesk.comments',
-    'superdesk.storage.amazon.import_from_amazon',
 
     'superdesk.io',
     'superdesk.io.subjectcodes',
@@ -147,6 +139,7 @@ INSTALLED_APPS = [
     'superdesk.publish',
     'superdesk.macro_register',
     'superdesk.commands',
+    'superdesk.data_consistency',
 
     'apps.archive',
     'apps.stages',
@@ -165,6 +158,7 @@ INSTALLED_APPS = [
     'apps.rules',
     'apps.highlights',
     'apps.publish',
+    'apps.publish.publish_filters',
     'apps.macros',
     'apps.dictionaries',
     'apps.duplication',
@@ -174,18 +168,22 @@ INSTALLED_APPS = [
     'apps.text_archive',
     'apps.validators',
     'apps.validate',
+    'apps.publicapi_publish',
+    'apps.workspace',
 ]
 
 RESOURCE_METHODS = ['GET', 'POST']
 ITEM_METHODS = ['GET', 'PATCH', 'PUT', 'DELETE']
 EXTENDED_MEDIA_INFO = ['content_type', 'name', 'length']
 RETURN_MEDIA_AS_BASE64_STRING = False
+VERSION = '_current_version'
 
 AMAZON_CONTAINER_NAME = env('AMAZON_CONTAINER_NAME', '')
 AMAZON_ACCESS_KEY_ID = env('AMAZON_ACCESS_KEY_ID', '')
 AMAZON_SECRET_ACCESS_KEY = env('AMAZON_SECRET_ACCESS_KEY', '')
 AMAZON_REGION = env('AMAZON_REGION', 'us-east-1')
-
+AMAZON_SERVE_DIRECT_LINKS = env('AMAZON_SERVE_DIRECT_LINKS', False)
+AMAZON_S3_USE_HTTPS = env('AMAZON_S3_USE_HTTPS', False)
 
 RENDITIONS = {
     'picture': {
@@ -251,7 +249,7 @@ CONTENT_EXPIRY_MINUTES = 43200
 
 # The number of minutes before ingest items purged
 # 2880 = 2 days in minutes
-INGEST_EXPIRY_MINUTES = 2880
+INGEST_EXPIRY_MINUTES = int(env('INGEST_EXPIRY_MINUTES', '2880'))
 
 # The number of minutes before published items purged
 # 4320 = 3 days in minutes
@@ -273,11 +271,21 @@ MACROS_MODULE = env('MACROS_MODULE', 'macros')
 WS_HOST = env('WSHOST', '0.0.0.0')
 WS_PORT = env('WSPORT', '5100')
 
-AAP_MM_USER = env('AAP_MM_USER', None)
-AAP_MM_PASSWORD = env('AAP_MM_PASSWORD', None)
-
 # Defines the maximum value of Publish Sequence Number after which the value will start from 1
 MAX_VALUE_OF_PUBLISH_SEQUENCE = 9999
 
 # Defines default value for Source to be set for manually created articles
 DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES = env('DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES', 'AAP')
+
+# Determines if the ODBC publishing mechanism will be used, If enabled then pyodbc must be installed along with it's
+# dependencies
+ODBC_PUBLISH = env('ODBC_PUBLISH', None)
+# ODBC test server connection string
+ODBC_TEST_CONNECTION_STRING = env('ODBC_TEST_CONNECTION_STRING',
+                                  'DRIVER=FreeTDS;DSN=NEWSDB;UID=???;PWD=???;DATABASE=News')
+
+# This value gets injected into NewsML 1.2 and G2 output documents.
+NEWSML_PROVIDER_ID = env('NEWSML_PROVIDER_ID', 'sourcefabric.org')
+
+OrganizationName = "Australian Associated Press"
+OrganizationNameAbbreviation = "AAP"

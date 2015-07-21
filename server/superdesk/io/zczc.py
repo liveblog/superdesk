@@ -67,7 +67,7 @@ class ZCZCParser(Parser):
                                 item[self.header_map[line[0]]] = line[1:-1]
                             continue
                         if line[0] == self.CATEGORY:
-                            item['anpa-category'] = {'qcode': line[1]}
+                            item['anpa_category'] = [{'qcode': line[1]}]
                             continue
                         if line[0] == self.FORMAT:
                             if line[1] == self.TEXT:
@@ -94,6 +94,6 @@ class ZCZCParser(Parser):
 
     def set_item_defaults(self, item):
         item['type'] = 'text'
-        item['urgency'] = '5'
+        item['urgency'] = 5
         item['pubstatus'] = 'usable'
         item['versioncreated'] = utcnow()

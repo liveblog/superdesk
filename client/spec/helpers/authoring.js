@@ -10,6 +10,8 @@ function Authoring() {
 
     /**
      * Send item to given desk
+     *
+     * @param {string} desk Desk name
      */
     this.sendTo = function sendTo(desk) {
         var sidebar = element(by.css('.send-to-pane')),
@@ -32,11 +34,18 @@ function Authoring() {
     };
 
     this.save = function() {
-        return element(by.css('[ng-click="save(item)"]')).click();
+        element(by.css('[ng-click="save(item)"]')).click();
+        return browser.wait(function() {
+            return element(by.buttonText('SAVE')).getAttribute('disabled');
+        });
     };
 
     this.showSearch = function() {
         return element(by.id('Search')).click();
+    };
+
+    this.showMulticontent = function() {
+        element(by.id('Aggregate')).click();
     };
 
     this.showVersions = function() {
@@ -120,6 +129,18 @@ function Authoring() {
 
     this.checkMarkedForHighlight = function(highlight, item) {
         expect(element(by.className('icon-star-color')).isDisplayed()).toBeTruthy();
-        expect(element(by.className('icon-star-color')).getAttribute('tooltip-html-unsafe')).toContain(highlight);
+        expect(element(by.className('icon-star-color')).getAttribute('tooltip-html-unsafe'))
+            .toContain(highlight);
     };
+
+    this.writeText = function (text) {
+        element(by.model('item.body_html')).all(by.className('editor-type-html')).sendKeys(text);
+    };
+    this.writeTextToHeadline = function (text) {
+        element(by.model('item.headline')).all(by.className('editor-type-html')).sendKeys(text);
+    };
+    this.writeTextToAbstract = function (text) {
+        element(by.model('item.abstract')).all(by.className('editor-type-html')).sendKeys(text);
+    };
+
 }

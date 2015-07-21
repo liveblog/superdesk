@@ -28,23 +28,30 @@ class FormatterRegistry(type):
 class Formatter(metaclass=FormatterRegistry):
     """Base Formatter class for all types of Formatters like News ML 1.2, News ML G2, NITF, etc."""
 
-    def format(self, article, provider):
+    def format(self, article, subscriber):
         """Formats the article and returns the transformed string"""
         raise NotImplementedError()
 
-    def can_format(self, format_type):
-        """Test if formatter can format for given type."""
+    def can_format(self, format_type, article):
+        """Test if formatter can format for given article."""
         raise NotImplementedError()
 
 
-def get_formatter(format_type, article_type):
+def get_formatter(format_type, article):
     """Get parser for given xml.
 
     :param etree: parsed xml
     """
     for formatter in formatters:
-        if formatter.can_format(format_type, article_type):
+        if formatter.can_format(format_type, article):
             return formatter
 
 
 import apps.publish.formatters.nitf_formatter  # NOQA
+import apps.publish.formatters.aap_ipnews_formatter  # NOQA
+import apps.publish.formatters.anpa_formatter  # NOQA
+import apps.publish.formatters.ninjs_formatter  # NOQA
+import apps.publish.formatters.newsml_1_2_formatter  # NOQA
+import apps.publish.formatters.newsml_g2_formatter  # NOQA
+import apps.publish.formatters.aap_bulletinbuilder_formatter  # NOQA
+import apps.publish.formatters.aap_sms_formatter  # NOQA

@@ -7,7 +7,7 @@
             {field: 'versioncreated', label: gettext('Updated')},
             {field: 'firstcreated', label: gettext('Created')},
             {field: 'urgency', label: gettext('News Value')},
-            {field: 'anpa-category.name', label: gettext('Category')},
+            {field: 'anpa_category.name', label: gettext('Category')},
             {field: 'slugline', label: gettext('Keyword')},
             {field: 'priority', label: gettext('Priority')}
         ];
@@ -32,6 +32,31 @@
             $location.search('sort', field + ':' + dir);
             $location.search('page', null);
         }
+
+        /*
+         * Function for finding object by string array for subject codes
+         */
+        this.getSubjectCodes = function (currentTags, subjectcodes) {
+            var queryArray = currentTags.selectedParameters, filteredArray = [];
+            if (!$location.search().q) {
+                return filteredArray;
+            }
+            for (var i = 0, queryArrayLength = queryArray.length; i < queryArrayLength; i++) {
+                var queryArrayElement = queryArray[i];
+                if (queryArrayElement.indexOf('subject.name') !== -1) {
+                    var elementName = queryArrayElement.substring(
+                            queryArrayElement.lastIndexOf('(') + 1,
+                            queryArrayElement.lastIndexOf(')')
+                            );
+                    for (var j = 0, subjectCodesLength = subjectcodes.length; j < subjectCodesLength; j++) {
+                        if (subjectcodes[j].name === elementName) {
+                            filteredArray.push(subjectcodes[j]);
+                        }
+                    }
+                }
+            }
+            return filteredArray;
+        };
 
         // sort public api
         this.setSort = sort;
@@ -117,7 +142,7 @@
                 }
 
                 if (params.category) {
-                    query.post_filter({terms: {'anpa-category.name': JSON.parse(params.category)}});
+                    query.post_filter({terms: {'anpa_category.name': JSON.parse(params.category)}});
                 }
 
                 if (params.desk) {
@@ -340,10 +365,16 @@
         };
     }
 
-    SearchController.$inject = ['$scope', '$location', 'api', 'search'];
-    function SearchController($scope, $location, api, search) {
-
+    SearchController.$inject = ['$scope', '$location', 'api', 'search', 'notify', 'session'];
+    function SearchController($scope, $location, api, search, notify, session) {
         $scope.context = 'search';
+        $scope.$on('item:deleted:archive:text', itemDelete);
+
+        function itemDelete(e, data) {
+            if (session.identity._id === data.user) {
+                refresh();
+            }
+        }
 
         $scope.repo = {
             ingest: true,
@@ -394,6 +425,7 @@
     ])
         .service('search', SearchService)
         .service('tags', TagService)
+        .controller('MultiActionBar', MultiActionBarController)
         .filter('FacetLabels', function() {
             return function(input) {
                 if (input.toUpperCase() === 'URGENCY') {
@@ -566,20 +598,16 @@
             };
         }])
 
-        .directive('sdSearchTags', ['$location', '$route', 'tags', 'asset',
-            function($location, $route, tags, asset) {
+        .directive('sdSearchTags', ['$location', '$route', 'tags', 'asset', 'metadata',
+            function($location, $route, tags, asset, metadata) {
             return {
                 scope: {},
                 templateUrl: asset.templateUrl('superdesk-search/views/search-tags.html'),
                 link: function(scope, elem) {
 
-                    var update = function() {
-                        tags.initSelectedFacets().then(function(currentTags) {
-                            scope.tags = currentTags;
-                        });
-                    };
-
-                    update();
+                    tags.initSelectedFacets().then(function(currentTags) {
+                        scope.tags = currentTags;
+                    });
 
                     scope.removeFilter = function(type, key) {
                         tags.removeFacet(type, key);
@@ -590,6 +618,15 @@
                         if (params.q) {
                             params.q = params.q.replace(param, '').trim();
                             $location.search('q', params.q || null);
+                            // If it is subject code, remove it from left bar, too
+                            if (param.indexOf('subject.name:') !== -1) {
+                                var elementName = param.substring(
+                                    param.lastIndexOf('(') + 1,
+                                    param.lastIndexOf(')')
+                                );
+
+                                metadata.removeSubjectTerm(elementName);
+                            }
                         }
                     };
                 }
@@ -665,10 +702,9 @@
                     scope.$on('key:v', toggleView);
 
                     function setView(view) {
+                        scope.view = view || 'mgrid';
                         update['archive:view'].view = view || 'mgrid';
-                        preferencesService.update(update, 'archive:view').then(function() {
-                            scope.view = view || 'mgrid';
-                        });
+                        preferencesService.update(update, 'archive:view');
                     }
 
                     function toggleView() {
@@ -725,6 +761,24 @@
                             }
                         }
                     }
+                }
+            };
+        }])
+
+        .directive('sdItemPreview', ['asset', function(asset) {
+            return {
+                templateUrl: asset.templateUrl('superdesk-search/views/item-preview.html'),
+                scope: {
+                    item: '=',
+                    close: '&',
+                    openLightbox: '=',
+                    openSingleItem: '='
+                },
+                link: function(scope) {
+                    scope.tab = 'content';
+                    scope.$watch('item', function(item) {
+                        scope.selected = {preview: item || null};
+                    });
                 }
             };
         }])
@@ -848,8 +902,6 @@
                     };
 
                     scope.search = function() {
-                        scope.focused = false;
-                        input.blur();
                         $location.search('q', input[0].value || null);
                     };
 
@@ -883,7 +935,8 @@
             };
         }])
 
-        .directive('sdItemSearch', ['$location', '$timeout', 'asset', 'api', function($location, $timeout, asset, api) {
+        .directive('sdItemSearch', ['$location', '$timeout', 'asset', 'api', 'tags', 'search', 'metadata',
+            function($location, $timeout, asset, api, tags, search, metadata) {
             return {
                 scope: {
                     repo: '=',
@@ -1020,6 +1073,50 @@
                             }, 0, false);
                         });
                     });
+
+                    /*
+                     * Converting to object and adding pre-selected subject codes to list in left sidebar
+                     */
+                    metadata
+                        .fetchSubjectcodes()
+                        .then(function () {
+                            scope.subjectcodes = metadata.values.subjectcodes;
+                            return tags.initSelectedFacets();
+                        })
+                        .then(function (currentTags) {
+                            scope.subjectitems = {
+                                subject: search.getSubjectCodes(currentTags, scope.subjectcodes)
+                            };
+                        });
+
+                    /*
+                     * Filter content by subject search
+                     */
+                    scope.subjectSearch = function (item) {
+                        tags.initSelectedFacets().then(function (currentTags) {
+                            var subjectCodes = search.getSubjectCodes(currentTags, scope.subjectcodes);
+                            if (item.subject.length > subjectCodes.length) {
+                                /* Adding subject codes to filter */
+                                var addItemSubjectName = 'subject.name:(' + item.subject[item.subject.length - 1].name + ')',
+                                    query = getQuery(),
+                                    q = (query === null ? addItemSubjectName : query + ' ' + addItemSubjectName);
+
+                                $location.search('q', q);
+                            } else {
+                                /* Removing subject codes from filter */
+                                var params = $location.search();
+                                if (params.q) {
+                                    for (var j = 0; j < subjectCodes.length; j++) {
+                                        if (item.subject.indexOf(subjectCodes[j]) === -1) {
+                                            var removeItemSubjectName = 'subject.name:(' + subjectCodes[j].name + ')';
+                                            params.q = params.q.replace(removeItemSubjectName, '').trim();
+                                            $location.search('q', params.q || null);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    };
                 }
             };
         }])
@@ -1124,17 +1221,14 @@
             };
         })
 
-        .directive('sdMultiActionBar', ['asset', 'multi', 'multiEdit',
-        function(asset, multi, multiEdit) {
+        .directive('sdMultiActionBar', ['asset', 'multi',
+        function(asset, multi) {
             return {
+                controller: 'MultiActionBar',
+                controllerAs: 'action',
                 templateUrl: asset.templateUrl('superdesk-search/views/multi-action-bar.html'),
                 link: function(scope) {
                     scope.multi = multi;
-
-                    scope.multiedit = function() {
-                        multiEdit.create(multi.getQueue());
-                        multiEdit.open();
-                    };
                 }
             };
         }])
@@ -1149,7 +1243,51 @@
                 controller: SearchController,
                 templateUrl: asset.templateUrl('superdesk-search/views/search.html')
             });
-        }])
+        }]);
 
-        ;
+    MultiActionBarController.$inject = ['multi', 'multiEdit', 'send', 'packages', 'superdesk', 'notify', 'spike', 'authoring'];
+    function MultiActionBarController(multi, multiEdit, send, packages, superdesk, notify, spike, authoring) {
+        this.send  = function() {
+            return send.all(multi.getItems());
+        };
+
+        this.sendAs = function() {
+            return send.allAs(multi.getItems());
+        };
+
+        this.multiedit = function() {
+            multiEdit.create(multi.getIds());
+            multiEdit.open();
+        };
+
+        this.createPackage = function() {
+            packages.createPackageFromItems(multi.getItems())
+            .then(function(new_package) {
+                superdesk.intent('author', 'package', new_package);
+            }, function(response) {
+                if (response.status === 403 && response.data && response.data._message) {
+                    notify.error(gettext(response.data._message), 3000);
+                }
+            });
+        };
+
+        this.spikeItems = function() {
+            spike.spikeMultiple(multi.getItems());
+            multi.reset();
+        };
+
+        this.unspikeItems = function() {
+            spike.unspikeMultiple(multi.getItems());
+            multi.reset();
+        };
+
+        this.canSpikeItems = function() {
+            var canSpike = true;
+            multi.getItems().forEach(function(item) {
+                canSpike = canSpike && authoring.itemActions(item).spike;
+            });
+            return canSpike;
+        };
+    }
+
 })();

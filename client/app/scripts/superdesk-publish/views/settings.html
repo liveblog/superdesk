@@ -5,18 +5,18 @@
             <li ng-class="{active: tab === 'subscribers'}" ng-show="showSubscribers">
                 <button ng-click="tab = 'subscribers'" translate>Subscribers</button>
             </li>
-            <li ng-class="{active: tab === 'output_channels'}" ng-show="showOutputChannels">
-                <button ng-click="tab = 'output_channels'" translate>Output Channels</button>
+			<li ng-class="{active: tab === 'filter_conditions'}" ng-show="showFilterConditions">
+                <button ng-click="tab = 'filter_conditions'" translate>Filter Conditions</button>
             </li>
-            <li ng-class="{active: tab === 'destination_groups'}" ng-show="showDestinationGroups">
-                <button ng-click="tab = 'destination_groups'" translate>Destination Groups</button>
+            <li ng-class="{active: tab === 'publish_filters'}" ng-show="showFilterConditions">
+                <button ng-click="tab = 'publish_filters'" translate>Publish Filters</button>
             </li>
         </ul>
         
         <div class="content">
             <div ng-if="tab === 'subscribers'" sd-admin-pub-subscribers></div>
-            <div ng-if="tab === 'output_channels'" sd-admin-pub-output-channels></div>
-            <div ng-if="tab === 'destination_groups'" sd-admin-pub-destination-groups></div>
+            <div ng-if="tab === 'filter_conditions'" ng-include="'scripts/superdesk-publish/filters/view/filter-conditions.html'"></div>
+            <div ng-if="tab === 'publish_filters'" ng-include="'scripts/superdesk-publish/filters/view/publish_filters.html'"></div>
         </div>
     </div>
 </div>

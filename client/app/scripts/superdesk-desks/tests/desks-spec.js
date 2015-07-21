@@ -7,7 +7,8 @@ describe('desks service', function() {
 
     beforeEach(module('superdesk.desks'));
 
-    it('can fetch current user desks', inject(function(desks, session, api, preferencesService, $rootScope, $q) {
+    it('can fetch current user desks',
+    inject(function(desks, session, api, preferencesService, $rootScope, $q) {
         spyOn(session, 'getIdentity').and.returnValue($q.when({_links: {self: {href: USER_URL}}}));
         spyOn(api, 'get').and.returnValue($q.when({_items: [{name: 'sport'}, {name: 'news'}]}));
         spyOn(preferencesService, 'get').and.returnValue($q.when([]));
@@ -23,26 +24,26 @@ describe('desks service', function() {
         expect(userDesks.length).toBe(2);
     }));
 
-    it('can pick a first desk if user has no current desk selected',
-        inject(function(desks, session, api, preferencesService, $q, $rootScope) {
-            spyOn(preferencesService, 'get').and.returnValue($q.when('missing'));
-            spyOn(preferencesService, 'update');
-            spyOn(desks, 'fetchUserDesks').and.returnValue($q.when({_items: [{_id: 'foo'}]}));
-            desks.fetchCurrentUserDesks();
-            $rootScope.$digest();
-            expect(desks.activeDeskId).toBe('foo');
-            expect(preferencesService.update).not.toHaveBeenCalled();
-        })
-    );
-
-    it('can checks if current desk is part of user desks',
+    it('can pick personal desk if user has no current desk selected',
         inject(function(desks, session, api, preferencesService, $q, $rootScope) {
             spyOn(preferencesService, 'get').and.returnValue($q.when('missing'));
             spyOn(preferencesService, 'update');
             spyOn(desks, 'fetchUserDesks').and.returnValue($q.when({_items: []}));
-            desks.fetchCurrentUserDesks();
+            desks.userDesks = desks.fetchCurrentUserDesks();
             $rootScope.$digest();
-            expect(desks.activeDeskId).toBe(null);
+            expect(desks.getCurrentDeskId()).toBe(null);
+            expect(preferencesService.update).not.toHaveBeenCalled();
+        })
+    );
+
+    it('can checks if current desk is part of user desks, personal will be selected',
+        inject(function(desks, session, api, preferencesService, $q, $rootScope) {
+            spyOn(preferencesService, 'get').and.returnValue($q.when('missing'));
+            spyOn(preferencesService, 'update');
+            spyOn(desks, 'fetchUserDesks').and.returnValue($q.when({_items: []}));
+            desks.userDesks = desks.fetchCurrentUserDesks();
+            $rootScope.$digest();
+            expect(desks.getCurrentDeskId()).toBe(null);
             expect(preferencesService.update).not.toHaveBeenCalled();
         })
     );
@@ -100,45 +101,22 @@ describe('desks service', function() {
         expect(active).toBe(desks.active);
     }));
 
-    describe('aggregate view widget', function() {
-        var CTRL_NAME = 'AggregateWidgetCtrl';
+    describe('getCurrentDeskId() method', function () {
+        var desks;
 
-        beforeEach(inject(function(desks, $q) {
-            spyOn(desks, 'initialize').and.returnValue($q.when({}));
-            spyOn(desks, 'fetchCurrentUserDesks').and.returnValue($q.when({}));
+        beforeEach(inject(function (_desks_) {
+            desks = _desks_;
         }));
 
-        it('shows all desks if not configured', inject(function ($controller, $rootScope, $q, preferencesService) {
-            spyOn(preferencesService, 'get').and.returnValue($q.when({active: {}}));
+        it('returns null if user desks list is empty', function () {
+            var result;
 
-            var ctrl = $controller(CTRL_NAME);
-            $rootScope.$digest();
-            expect(ctrl.configured).toBe(false);
-            expect(ctrl.isActive({_id: 'foo'})).toBe(true);
+            desks.userDesks = {
+                _items: []
+            };
 
-            // when not selecting any desk/stage - still unconfigured
-            spyOn(preferencesService, 'update').and.returnValue($q.when({}));
-            ctrl.save();
-            $rootScope.$digest();
-            expect(ctrl.configured).toBe(false);
-            expect(ctrl.isActive({_id: 'foo'})).toBe(true);
-
-            // use config once there is something
-            ctrl.active.bar = true;
-            ctrl.save();
-            $rootScope.$digest();
-            expect(ctrl.configured).toBe(true);
-            expect(ctrl.isActive({_id: 'foo'})).toBe(false);
-            expect(ctrl.isActive({_id: 'bar'})).toBe(true);
-        }));
-
-        it('shows selected desks when configured', inject(function ($controller, $rootScope, $q, preferencesService) {
-            spyOn(preferencesService, 'get').and.returnValue($q.when({active: {foo: 1}}));
-            var ctrl = $controller(CTRL_NAME);
-            $rootScope.$digest();
-            expect(ctrl.configured).toBe(true);
-            expect(ctrl.isActive({_id: 'bar'})).toBe(false);
-            expect(ctrl.isActive({_id: 'foo'})).toBe(true);
-        }));
+            result = desks.getCurrentDeskId();
+            expect(result).toBe(null);
+        });
     });
 });

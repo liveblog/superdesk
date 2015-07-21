@@ -9,8 +9,7 @@
 # at https://www.sourcefabric.org/superdesk/license
 
 from apps.users.services import current_user_has_privilege
-from settings import DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES
-
+from settings import DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES, VERSION
 
 SOURCE = 'archive'
 
@@ -18,13 +17,13 @@ import flask
 from superdesk.resource import Resource
 from .common import extra_response_fields, item_url, aggregations, remove_unwanted, update_state, set_item_expiry, \
     is_update_allowed
-from .common import on_create_item, on_duplicate_item, generate_unique_id_and_name
-from .common import get_user, update_version, set_sign_off, handle_existing_data
+from .common import on_create_item, on_duplicate_item
+from .common import get_user, update_version, set_sign_off, handle_existing_data, item_schema
 from flask import current_app as app
 from werkzeug.exceptions import NotFound
 from superdesk import get_resource_service
 from superdesk.errors import SuperdeskApiError
-from eve.versioning import resolve_document_version
+from eve.versioning import resolve_document_version, versioned_id_field
 from superdesk.activity import add_activity, ACTIVITY_CREATE, ACTIVITY_UPDATE, ACTIVITY_DELETE
 from eve.utils import parse_request, config
 from superdesk.services import BaseService
@@ -33,10 +32,9 @@ from apps.content import metadata_schema
 from apps.common.components.utils import get_component
 from apps.item_autosave.components.item_autosave import ItemAutosave
 from apps.common.models.base_model import InvalidEtag
-from apps.legal_archive.components.legal_archive_proxy import LegalArchiveProxy
 from superdesk.etree import get_word_count
 from superdesk.notification import push_notification
-from copy import copy
+from copy import copy, deepcopy
 import superdesk
 import logging
 from apps.common.models.utils import get_model
@@ -45,40 +43,11 @@ from apps.packages import PackageService, TakesPackageService
 from .archive_media import ArchiveMediaService
 from superdesk.utc import utcnow
 import datetime
+from apps.archive.common import ITEM_DUPLICATE, ITEM_OPERATION, ITEM_RESTORE,\
+    ITEM_UPDATE, ITEM_DESCHEDULE
+
 
 logger = logging.getLogger(__name__)
-
-
-def item_schema(extra=None):
-    """Create schema for item.
-
-    :param extra: extra fields to be added to schema
-    """
-    schema = {
-        'old_version': {
-            'type': 'number',
-        },
-        'last_version': {
-            'type': 'number',
-        },
-        'task': {'type': 'dict'},
-        'destination_groups': {
-            'type': 'list',
-            'schema': Resource.rel('destination_groups', True)
-        },
-        'publish_schedule': {
-            'type': 'datetime',
-            'nullable': True
-        },
-        'marked_for_not_publication': {
-            'type': 'boolean',
-            'default': False
-        }
-    }
-    schema.update(metadata_schema)
-    if extra:
-        schema.update(extra)
-    return schema
 
 
 def get_subject(doc1, doc2=None):
@@ -163,8 +132,13 @@ class ArchiveService(BaseService):
         """
         Overriding this to handle existing data in Mongo & Elastic
         """
+        self.__enhance_items(docs[config.ITEMS])
 
-        for item in docs[config.ITEMS]:
+    def on_fetched_item(self, doc):
+        self.__enhance_items([doc])
+
+    def __enhance_items(self, items):
+        for item in items:
             handle_existing_data(item)
             self.takesService.enhance_with_package_info(item)
 
@@ -185,7 +159,7 @@ class ArchiveService(BaseService):
 
             # let client create version 0 docs
             if doc.get('version') == 0:
-                doc['_version'] = doc['version']
+                doc[config.VERSION] = doc['version']
 
             if not doc.get('ingest_provider'):
                 doc['source'] = DEFAULT_SOURCE_VALUE_FOR_MANUAL_ARTICLES
@@ -195,7 +169,6 @@ class ArchiveService(BaseService):
         if packages:
             self.packageService.on_created(packages)
 
-        get_component(LegalArchiveProxy).create(docs)
         user = get_user()
         for doc in docs:
             subject = get_subject(doc)
@@ -208,6 +181,7 @@ class ArchiveService(BaseService):
             push_notification('item:created', item=str(doc['_id']), user=str(user.get('_id')))
 
     def on_update(self, updates, original):
+        updates[ITEM_OPERATION] = ITEM_UPDATE
         is_update_allowed(original)
         user = get_user()
 
@@ -236,9 +210,9 @@ class ArchiveService(BaseService):
         lock_user = original.get('lock_user', None)
         force_unlock = updates.get('force_unlock', False)
 
-        updates.setdefault('original_creator', original['original_creator'])
+        updates.setdefault('original_creator', original.get('original_creator'))
 
-        str_user_id = str(user.get('_id'))
+        str_user_id = str(user.get('_id')) if user else None
         if lock_user and str(lock_user) != str_user_id and not force_unlock:
             raise SuperdeskApiError.forbiddenError('The item was locked by another user')
 
@@ -258,22 +232,24 @@ class ArchiveService(BaseService):
 
     def on_updated(self, updates, original):
         get_component(ItemAutosave).clear(original['_id'])
-        get_component(LegalArchiveProxy).update(original, updates)
 
         if original['type'] == 'composite':
             self.packageService.on_updated(updates, original)
 
         user = get_user()
-        if '_version' in updates:
+
+        if config.VERSION in updates:
             updated = copy(original)
             updated.update(updates)
             add_activity(ACTIVITY_UPDATE, 'created new version {{ version }} for item {{ type }} about "{{ subject }}"',
                          self.datasource, item=updated,
-                         version=updates['_version'], subject=get_subject(updates, original),
+                         version=updates[config.VERSION], subject=get_subject(updates, original),
                          type=updated['type'])
-            push_notification('item:updated', item=str(original['_id']), user=str(user.get('_id')))
+
+        push_notification('item:updated', item=str(original['_id']), user=str(user.get('_id')))
 
     def on_replace(self, document, original):
+        document[ITEM_OPERATION] = ITEM_UPDATE
         remove_unwanted(document)
         user = get_user()
         lock_user = original.get('lock_user', None)
@@ -325,7 +301,6 @@ class ArchiveService(BaseService):
             raise SuperdeskApiError.forbiddenError("User does not have permissions to read the item.")
 
         handle_existing_data(item)
-
         return item
 
     def restore_version(self, id, doc, original):
@@ -335,7 +310,8 @@ class ArchiveService(BaseService):
         if (not all([item_id, old_version, last_version])):
             return None
 
-        old = get_resource_service('archive_versions').find_one(req=None, _id_document=item_id, _version=old_version)
+        old = get_resource_service('archive_versions').find_one(req=None, _id_document=item_id,
+                                                                _current_version=old_version)
         if old is None:
             raise SuperdeskApiError.notFoundError('Invalid version %s' % old_version)
 
@@ -349,6 +325,7 @@ class ArchiveService(BaseService):
         old['_updated'] = old['versioncreated'] = utcnow()
         set_item_expiry(old, doc)
         del old['_id_document']
+        old[ITEM_OPERATION] = ITEM_RESTORE
 
         resolve_document_version(old, 'archive', 'PATCH', curr)
 
@@ -361,49 +338,81 @@ class ArchiveService(BaseService):
         return item_id
 
     def duplicate_content(self, original_doc):
+        """
+        Duplicates the 'original_doc' including it's version history. Copy and Duplicate actions use this method.
+
+        :return: guid of the duplicated article
+        """
+
         if original_doc.get('type', '') == 'composite':
             for groups in original_doc.get('groups'):
                 if groups.get('id') != 'root':
                     associations = groups.get('refs', [])
                     for assoc in associations:
                         if assoc.get('residRef'):
-                            item, item_id, endpoint = self.packageService.get_associated_item(assoc)
+                            item, _item_id, _endpoint = self.packageService.get_associated_item(assoc)
                             assoc['residRef'] = assoc['guid'] = self.duplicate_content(item)
 
-        return self.duplicate_item(original_doc)
+        return self._duplicate_item(original_doc)
 
-    def duplicate_item(self, original_doc):
+    def _duplicate_item(self, original_doc):
+        """
+        Duplicates the 'original_doc' including it's version history. If the article being duplicated is contained
+        in a desk then the article state is changed to Submitted.
+
+        :return: guid of the duplicated article
+        """
+
         new_doc = original_doc.copy()
-        del new_doc['_id']
+        del new_doc[config.ID_FIELD]
         del new_doc['guid']
-        generate_unique_id_and_name(new_doc)
+
+        new_doc[ITEM_OPERATION] = ITEM_DUPLICATE
         item_model = get_model(ItemModel)
+
         on_duplicate_item(new_doc)
+        resolve_document_version(new_doc, 'archive', 'PATCH', new_doc)
+        if original_doc.get('task', {}).get('desk') is not None and new_doc.get('state') != 'submitted':
+            new_doc[config.CONTENT_STATE] = 'submitted'
         item_model.create([new_doc])
-        self.duplicate_versions(original_doc['guid'], new_doc)
-        if new_doc.get('state') != 'submitted':
-            get_resource_service('tasks').patch(new_doc['_id'], {'state': 'submitted'})
+        self._duplicate_versions(original_doc['guid'], new_doc)
+
         return new_doc['guid']
 
-    def duplicate_versions(self, old_id, new_doc):
-        lookup = {'guid': old_id}
-        old_versions = get_resource_service('archive_versions').get(req=None, lookup=lookup)
+    def _duplicate_versions(self, old_id, new_doc):
+        """
+        Duplicates the version history of the article identified by old_id. Each version identifiers are changed
+        to have the identifiers of new_doc.
+
+        :param old_id: identifier to fetch version history
+        :param new_doc: identifiers from this doc will be used to create version history for the duplicated item.
+        """
+
+        old_versions = get_resource_service('archive_versions').get(req=None, lookup={'guid': old_id})
 
         new_versions = []
         for old_version in old_versions:
-            old_version['_id_document'] = new_doc['_id']
-            del old_version['_id']
+            old_version[versioned_id_field()] = new_doc[config.ID_FIELD]
+            del old_version[config.ID_FIELD]
+
             old_version['guid'] = new_doc['guid']
             old_version['unique_name'] = new_doc['unique_name']
             old_version['unique_id'] = new_doc['unique_id']
             old_version['versioncreated'] = utcnow()
+            if old_version[VERSION] == new_doc[VERSION]:
+                old_version[ITEM_OPERATION] = new_doc[ITEM_OPERATION]
             new_versions.append(old_version)
+        last_version = deepcopy(new_doc)
+        last_version['_id_document'] = new_doc['_id']
+        del last_version['_id']
+        new_versions.append(last_version)
         if new_versions:
             get_resource_service('archive_versions').post(new_versions)
 
     def deschedule_item(self, updates, doc):
         updates['state'] = 'in_progress'
         updates['publish_schedule'] = None
+        updates[ITEM_OPERATION] = ITEM_DESCHEDULE
         # delete entries from publish queue
         get_resource_service('publish_queue').delete_by_article_id(doc['_id'])
         # delete entry from published repo
@@ -441,6 +450,18 @@ class ArchiveService(BaseService):
 
         return True, ''
 
+    def remove_expired(self, doc):
+        """
+        Removes the article from production if the state is spiked
+        """
+
+        assert doc[config.CONTENT_STATE] == 'spiked', \
+            "Article state is %s. Only Spiked Articles can be removed" % doc[config.CONTENT_STATE]
+
+        doc_id = str(doc[config.ID_FIELD])
+        super().delete_action({config.ID_FIELD: doc_id})
+        get_resource_service('archive_versions').delete(lookup={versioned_id_field(): doc_id})
+
     def __is_req_for_save(self, doc):
         """
         Patch of /api/archive is being used in multiple places. This method differentiates from the patch
@@ -461,9 +482,9 @@ class AutoSaveResource(Resource):
     item_url = item_url
     schema = item_schema({'_id': {'type': 'string'}})
     resource_methods = ['POST']
-    item_methods = ['GET', 'PUT', 'PATCH']
+    item_methods = ['GET', 'PUT', 'PATCH', 'DELETE']
     resource_title = endpoint_name
-    privileges = {'POST': 'archive', 'PATCH': 'archive', 'PUT': 'archive'}
+    privileges = {'POST': 'archive', 'PATCH': 'archive', 'PUT': 'archive', 'DELETE': 'archive'}
 
 
 class ArchiveSaveService(BaseService):
@@ -475,7 +496,10 @@ class ArchiveSaveService(BaseService):
             get_component(ItemAutosave).autosave(docs[0]['_id'], docs[0], get_user(required=True), req.if_match)
         except InvalidEtag:
             raise SuperdeskApiError.preconditionFailedError('Client and server etags don\'t match')
+        except KeyError:
+            raise SuperdeskApiError.badRequestError("Request for Auto-save must have _id")
         return [docs[0]['_id']]
+
 
 superdesk.workflow_state('in_progress')
 superdesk.workflow_action(

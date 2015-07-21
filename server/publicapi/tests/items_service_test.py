@@ -12,6 +12,7 @@ import json
 
 from datetime import date
 from eve.utils import ParsedRequest
+from flask import Flask
 from publicapi.tests import ApiTestCase
 from unittest import mock
 from unittest.mock import MagicMock
@@ -38,8 +39,8 @@ class ItemsServiceTestCase(ApiTestCase):
         return self._get_target_class()(*args, **kwargs)
 
 
-class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
-    """Tests for the _check_request_params() helper method."""
+class CheckForUnknownParamsMethodTestCase(ItemsServiceTestCase):
+    """Tests for the _check_for_unknown_params() helper method."""
 
     def test_does_not_raise_an_error_on_valid_parameters(self):
         request = MagicMock()
@@ -47,7 +48,7 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
 
         try:
-            instance._check_request_params(request, ('foo', 'sort_by', 'bar'))
+            instance._check_for_unknown_params(request, ('foo', 'sort_by', 'bar'))
         except Exception as ex:
             self.fail("Exception unexpectedly raised ({})".format(ex))
 
@@ -59,10 +60,10 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
 
         with self.assertRaises(UnexpectedParameterError) as context:
-            instance._check_request_params(request, ('foo', 'bar'))
+            instance._check_for_unknown_params(request, ('foo', 'bar'))
 
         ex = context.exception
-        self.assertEqual(ex.desc, 'Unexpected parameter (param_x)')
+        self.assertEqual(ex.payload, 'Unexpected parameter (param_x)')
 
     def test_raises_descriptive_error_on_filtering_disabled(self):
         request = MagicMock()
@@ -72,12 +73,12 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
 
         with self.assertRaises(UnexpectedParameterError) as context:
-            instance._check_request_params(
+            instance._check_for_unknown_params(
                 request, whitelist=(), allow_filtering=False)
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
+            ex.payload,
             'Filtering is not supported when retrieving a single object '
             '(the "q" parameter)'
         )
@@ -90,12 +91,12 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
 
         with self.assertRaises(UnexpectedParameterError) as context:
-            instance._check_request_params(
+            instance._check_for_unknown_params(
                 request, whitelist=(), allow_filtering=False)
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
+            ex.payload,
             'Filtering by date range is not supported when retrieving a '
             'single object (the "start_date" parameter)'
         )
@@ -108,12 +109,12 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
 
         with self.assertRaises(UnexpectedParameterError) as context:
-            instance._check_request_params(
+            instance._check_for_unknown_params(
                 request, whitelist=(), allow_filtering=False)
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
+            ex.payload,
             'Filtering by date range is not supported when retrieving a '
             'single object (the "end_date" parameter)'
         )
@@ -122,15 +123,15 @@ class CheckRequestParamsMethodTestCase(ItemsServiceTestCase):
         request = MagicMock()
         request.args = MultiDict([('foo', 'value 1'), ('foo', 'value 2')])
 
-        from publicapi.errors import BadParameterValueError
+        from publicapi.errors import UnexpectedParameterError
         instance = self._make_one()
 
-        with self.assertRaises(BadParameterValueError) as context:
-            instance._check_request_params(request, whitelist=('foo',))
+        with self.assertRaises(UnexpectedParameterError) as context:
+            instance._check_for_unknown_params(request, whitelist=('foo',))
 
         ex = context.exception
         self.assertEqual(
-            ex.desc, "Multiple values received for parameter (foo)")
+            ex.payload, "Multiple values received for parameter (foo)")
 
 
 fake_super_get = MagicMock(name='fake super().get')
@@ -144,8 +145,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
         super().setUp()
         fake_super_get.reset_mock()
 
-    @mock.patch('publicapi.items.service.ItemsService._check_request_params')
-    def test_correctly_invokes_parameter_validation(self, fake_check_params):
+    @mock.patch('publicapi.items.service.ItemsService._check_for_unknown_params')
+    def test_correctly_invokes_parameter_validation(self, fake_check_unknown):
         fake_request = MagicMock()
         fake_request.args = MultiDict()
         lookup = {}
@@ -153,13 +154,17 @@ class GetMethodTestCase(ItemsServiceTestCase):
         instance = self._make_one()
         instance.get(fake_request, lookup)
 
-        self.assertTrue(fake_check_params.called)
-        args, kwargs = fake_check_params.call_args
+        self.assertTrue(fake_check_unknown.called)
+        args, kwargs = fake_check_unknown.call_args
 
         self.assertGreater(len(args), 0)
         self.assertEqual(args[0], fake_request)
 
-        expected_whitelist = sorted(['start_date', 'end_date', 'q'])
+        expected_whitelist = sorted([
+            'start_date', 'end_date',
+            'exclude_fields', 'include_fields',
+            'q'
+        ])
 
         whitelist_arg = kwargs.get('whitelist')
         if whitelist_arg is not None:
@@ -170,6 +175,22 @@ class GetMethodTestCase(ItemsServiceTestCase):
             # whitelist can also be passed as a positional argument
             self.assertGreater(len(args), 1)
             self.assertEqual(sorted(list(args[1])), expected_whitelist)
+
+    @mock.patch('publicapi.items.service.ItemsService._set_fields_filter')
+    def test_sets_fields_filter_on_request_object(self, fake_set_fields_filter):
+        fake_request = MagicMock()
+        fake_request.args = MultiDict()
+        fake_request.projection = None
+        lookup = {}
+
+        instance = self._make_one()
+        instance.get(fake_request, lookup)
+
+        self.assertTrue(fake_set_fields_filter.called)
+        args, kwargs = fake_set_fields_filter.call_args
+
+        self.assertGreater(len(args), 0)
+        self.assertIs(args[0], fake_request)
 
     def test_invokes_superclass_method_with_given_arguments(self):
         request = MagicMock()
@@ -224,8 +245,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
-            ("start_date parameter must be an ISO 8601 date (YYYY-MM-DD) "
+            ex.payload,
+            ("start_date parameter must be a valid ISO 8601 date (YYYY-MM-DD) "
              "without the time part"))
 
     def test_raises_correct_error_on_invalid_end_date_parameter(self):
@@ -241,8 +262,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
-            ("end_date parameter must be an ISO 8601 date (YYYY-MM-DD) "
+            ex.payload,
+            ("end_date parameter must be a valid ISO 8601 date (YYYY-MM-DD) "
              "without the time part"))
 
     def test_raises_correct_error_if_start_date_greater_than_end_date(self):
@@ -261,7 +282,7 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         ex = context.exception
         self.assertEqual(
-            ex.desc, "Start date must not be greater than end date")
+            ex.payload, "Start date must not be greater than end date")
 
     def test_allows_start_and_end_dates_to_be_equal(self):
         request = MagicMock()
@@ -294,8 +315,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         date_filter = json.loads(args[0].where).get('versioncreated', {})
         expected_filter = {
-            '$gte': '2012-08-21',
-            '$lt': '2012-08-27'  # end_date + 1 day
+            '$gte': '2012-08-21T00:00:00+0000',
+            '$lt': '2012-08-27T00:00:00+0000'  # end_date + 1 day
         }
         self.assertEqual(date_filter, expected_filter)
 
@@ -316,8 +337,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         date_filter = json.loads(args[0].where).get('versioncreated', {})
         expected_filter = {
-            '$gte': '2012-08-21',
-            '$lt': '2014-07-16'  # today + 1 day
+            '$gte': '2012-08-21T00:00:00+0000',
+            '$lt': '2014-07-16T00:00:00+0000'  # today + 1 day
         }
         self.assertEqual(date_filter, expected_filter)
 
@@ -335,8 +356,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         date_filter = json.loads(args[0].where).get('versioncreated', {})
         expected_filter = {
-            '$gte': '2012-08-21',
-            '$lt': '2012-08-22'  # end_date + 1 day
+            '$gte': '2012-08-21T00:00:00+0000',
+            '$lt': '2012-08-22T00:00:00+0000'  # end_date + 1 day
         }
         self.assertEqual(date_filter, expected_filter)
 
@@ -359,8 +380,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         date_filter = json.loads(args[0].where).get('versioncreated', {})
         expected_filter = {
-            '$gte': '2014-07-15',
-            '$lt': '2014-07-16'  # today + 1 day
+            '$gte': '2014-07-15T00:00:00+0000',
+            '$lt': '2014-07-16T00:00:00+0000'  # today + 1 day
         }
         self.assertEqual(date_filter, expected_filter)
 
@@ -381,8 +402,8 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         date_filter = json.loads(args[0].where).get('versioncreated', {})
         expected_filter = {
-            '$gte': '2010-09-17',
-            '$lt': '2010-09-18'
+            '$gte': '2010-09-17T00:00:00+0000',
+            '$lt': '2010-09-18T00:00:00+0000'
         }
         self.assertEqual(date_filter, expected_filter)
 
@@ -402,7 +423,7 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
+            ex.payload,
             "Start date (2007-10-31) must not be set in the future "
             "(current server date (UTC): 2007-10-30)"
         )
@@ -423,7 +444,7 @@ class GetMethodTestCase(ItemsServiceTestCase):
 
         ex = context.exception
         self.assertEqual(
-            ex.desc,
+            ex.payload,
             "End date (2007-10-31) must not be set in the future "
             "(current server date (UTC): 2007-10-30)"
         )
@@ -448,6 +469,116 @@ class ParseIsoDateMethodTestCase(ItemsServiceTestCase):
             klass._parse_iso_date('5th May 2015')
 
 
+class SetFieldsFilterMethodTestCase(ItemsServiceTestCase):
+    """Tests for the _set_fields_filter() helper method."""
+
+    def test_raises_error_if_requesting_to_exclude_required_field(self):
+        request = MagicMock()
+        request.args = MultiDict([('exclude_fields', 'uri')])
+        request.projection = None
+
+        from publicapi.errors import BadParameterValueError
+        instance = self._make_one()
+
+        with self.assertRaises(BadParameterValueError) as context:
+            instance._set_fields_filter(request)
+
+        ex = context.exception
+        self.assertEqual(
+            ex.payload,
+            'Cannot exclude a content field required by the NINJS format '
+            '(uri).'
+        )
+
+    def test_raises_error_if_field_whitelist_and_blacklist_both_given(self):
+        request = MagicMock()
+        request.args = MultiDict([
+            ('include_fields', 'language'),
+            ('exclude_fields', 'body_text'),
+        ])
+        request.projection = None
+
+        from publicapi.errors import UnexpectedParameterError
+        instance = self._make_one()
+
+        with self.assertRaises(UnexpectedParameterError) as context:
+            instance._set_fields_filter(request)
+
+        ex = context.exception
+        self.assertEqual(
+            ex.payload,
+            'Cannot both include and exclude content fields at the same time.'
+        )
+
+    def test_raises_error_if_whitelisting_unknown_content_field(self):
+        request = MagicMock()
+        request.args = MultiDict([('include_fields', 'field_x')])
+        request.projection = None
+
+        from publicapi.errors import BadParameterValueError
+        from publicapi.items import ItemsResource
+
+        instance = self._make_one()
+
+        fake_schema = {'foo': 'schema_bar'}
+        with mock.patch.object(ItemsResource, 'schema', new=fake_schema):
+            with self.assertRaises(BadParameterValueError) as context:
+                instance._set_fields_filter(request)
+
+            ex = context.exception
+            self.assertEqual(
+                ex.payload, 'Unknown content field to include (field_x).')
+
+    def test_raises_error_if_blacklisting_unknown_content_field(self):
+        request = MagicMock()
+        request.args = MultiDict([('exclude_fields', 'field_x')])
+        request.projection = None
+
+        from publicapi.errors import BadParameterValueError
+        from publicapi.items import ItemsResource
+
+        instance = self._make_one()
+
+        fake_schema = {'foo': 'schema_bar'}
+        with mock.patch.object(ItemsResource, 'schema', new=fake_schema):
+            with self.assertRaises(BadParameterValueError) as context:
+                instance._set_fields_filter(request)
+
+            ex = context.exception
+            self.assertEqual(
+                ex.payload, 'Unknown content field to exclude (field_x).')
+
+    def test_filters_out_blacklisted_fields_if_requested(self):
+        request = MagicMock()
+        request.args = MultiDict([('exclude_fields', 'language,version')])
+        request.projection = None
+
+        instance = self._make_one()
+        instance._set_fields_filter(request)
+
+        projection = json.loads(request.projection) if request.projection else {}
+        expected_projection = {
+            'language': 0,
+            'version': 0,
+        }
+        self.assertEqual(projection, expected_projection)
+
+    def test_filters_out_all_but_whitelisted_fields_if_requested(self):
+        request = MagicMock()
+        request.args = MultiDict([('include_fields', 'body_text,byline')])
+        request.projection = None
+
+        instance = self._make_one()
+        instance._set_fields_filter(request)
+
+        projection = json.loads(request.projection) if request.projection else {}
+        expected_projection = {
+            'body_text': 1,
+            'byline': 1,
+        }
+        self.assertEqual(projection, expected_projection)
+
+
 fake_super_find_one = MagicMock(name='fake super().find_one')
 
 
@@ -459,33 +590,53 @@ class FindOneMethodTestCase(ItemsServiceTestCase):
         super().setUp()
         fake_super_find_one.reset_mock()
 
-    @mock.patch('publicapi.items.service.ItemsService._check_request_params')
-    def test_correctly_invokes_parameter_validation(self, fake_check_params):
+    @mock.patch('publicapi.items.service.ItemsService._check_for_unknown_params')
+    def test_correctly_invokes_parameter_validation(self, fake_check_unknown):
         fake_request = MagicMock()
+        fake_request.args = MultiDict()
         lookup = {'_id': 'my_item'}
 
         instance = self._make_one()
         instance.find_one(fake_request, **lookup)
 
-        self.assertTrue(fake_check_params.called)
-        args, kwargs = fake_check_params.call_args
+        self.assertTrue(fake_check_unknown.called)
+        args, kwargs = fake_check_unknown.call_args
 
         self.assertGreater(len(args), 0)
         self.assertEqual(args[0], fake_request)
         self.assertEqual(kwargs.get('allow_filtering'), False)
 
+        expected_whitelist = sorted(['exclude_fields', 'include_fields'])
+
         whitelist_arg = kwargs.get('whitelist')
         if whitelist_arg is not None:
             # NOTE: the whitelist argument is converted to a list, because any
             # iterable type is valid, not just lists
-            self.assertEqual(list(whitelist_arg), [])
+            self.assertEqual(sorted(list(whitelist_arg)), expected_whitelist)
         else:
             # whitelist can also be passed as a positional argument
             self.assertGreater(len(args), 1)
-            self.assertEqual(list(args[1]), [])
+            self.assertEqual(sorted(list(args[1])), expected_whitelist)
+
+    @mock.patch('publicapi.items.service.ItemsService._set_fields_filter')
+    def test_sets_fields_filter_on_request_object(self, fake_set_fields_filter):
+        fake_request = MagicMock()
+        fake_request.args = MultiDict()
+        fake_request.projection = None
+        lookup = {}
+
+        instance = self._make_one()
+        instance.find_one(fake_request, **lookup)
+
+        self.assertTrue(fake_set_fields_filter.called)
+        args, kwargs = fake_set_fields_filter.call_args
+
+        self.assertGreater(len(args), 0)
+        self.assertIs(args[0], fake_request)
 
     def test_invokes_superclass_method_with_given_arguments(self):
         request = MagicMock()
+        request.args = MultiDict()
         lookup = {'_id': 'my_item'}
 
         instance = self._make_one()
@@ -507,3 +658,240 @@ class FindOneMethodTestCase(ItemsServiceTestCase):
         args, kwargs = fake_super_find_one.call_args
         self.assertEqual(len(args), 1)
         self.assertIsInstance(args[0], ParsedRequest)
+
+
+class OnFetchedItemMethodTestCase(ItemsServiceTestCase):
+    """Tests for the on_fetched_item() method."""
+
+    def setUp(self):
+        super().setUp()
+
+        self.app = Flask(__name__)
+        self.app.config['PUBLICAPI_URL'] = 'http://api.com'
+        self.app.config['URLS'] = {'items': 'items_endpoint'}
+
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+
+    def tearDown(self):
+        self.app_context.pop()
+        super().tearDown()
+
+    def test_sets_uri_field_on_fetched_document(self):
+        document = {
+            '_id': 'item:123',
+            'headline': 'a test item'
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched_item(document)
+
+        self.assertEqual(
+            document.get('uri'),
+            'http://api.com/items_endpoint/item%3A123'  # %3A == urlquote(':')
+        )
+
+    def test_removes_non_ninjs_content_fields_from_fetched_document(self):
+        document = {
+            '_id': 'item:123',
+            '_etag': '12345abcde',
+            '_created': '12345abcde',
+            '_updated': '12345abcde',
+            'headline': 'breaking news'
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched_item(document)
+
+        for field in ('_created', '_etag', '_id', '_updated'):
+            self.assertNotIn(field, document)
+
+    def test_does_not_remove_hateoas_links_from_fetched_document(self):
+        document = {
+            '_id': 'item:123',
+            'headline': 'breaking news',
+            '_links': {
+                'self': {
+                    'href': 'link/to/item/itself',
+                    'title': 'Item'
+                }
+            }
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched_item(document)
+
+        expected_links = {
+            'self': {'href': 'link/to/item/itself', 'title': 'Item'}
+        }
+        self.assertEqual(document.get('_links'), expected_links)
+
+
+class OnFetchedMethodTestCase(ItemsServiceTestCase):
+    """Tests for the on_fetched() method."""
+
+    def setUp(self):
+        super().setUp()
+
+        self.app = Flask(__name__)
+        self.app.config['PUBLICAPI_URL'] = 'http://api.com'
+        self.app.config['URLS'] = {'items': 'items_endpoint'}
+
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        self.req_context = self.app.test_request_context('items/')
+        self.req_context.push()
+
+    def tearDown(self):
+        self.req_context.pop()
+        self.app_context.pop()
+        super().tearDown()
+
+    def test_sets_uri_field_on_all_fetched_documents(self):
+        result = {
+            '_items': [
+                {'_id': 'item:123', 'headline': 'a test item'},
+                {'_id': 'item:555', 'headline': 'another item'},
+            ]
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched(result)
+
+        documents = result['_items']
+        self.assertEqual(
+            documents[0].get('uri'),
+            'http://api.com/items_endpoint/item%3A123'  # %3A == urlquote(':')
+        )
+        self.assertEqual(
+            documents[1].get('uri'),
+            'http://api.com/items_endpoint/item%3A555'  # %3A == urlquote(':')
+        )
+
+    def test_removes_non_ninjs_content_fields_from_all_fetched_documents(self):
+        result = {
+            '_items': [{
+                '_id': 'item:123',
+                '_etag': '12345abcde',
+                '_created': '12345abcde',
+                '_updated': '12345abcde',
+                'headline': 'breaking news',
+            }, {
+                '_id': 'item:555',
+                '_etag': '67890fedcb',
+                '_created': '2121abab',
+                '_updated': '2121abab',
+                'headline': 'good news',
+            }]
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched(result)
+
+        documents = result['_items']
+        for doc in documents:
+            for field in ('_created', '_etag', '_id', '_updated'):
+                self.assertNotIn(field, doc)
+
+    def test_does_not_remove_hateoas_links_from_fetched_documents(self):
+        result = {
+            '_items': [{
+                '_id': 'item:123',
+                '_etag': '12345abcde',
+                '_created': '12345abcde',
+                '_updated': '12345abcde',
+                'headline': 'breaking news',
+                '_links': {
+                    'self': {
+                        'href': 'link/to/item_123',
+                        'title': 'Item'
+                    }
+                }
+            }, {
+                '_id': 'item:555',
+                '_etag': '67890fedcb',
+                '_created': '2121abab',
+                '_updated': '2121abab',
+                'headline': 'good news',
+                '_links': {
+                    'self': {
+                        'href': 'link/to/item_555',
+                        'title': 'Item'
+                    }
+                }
+            }]
+        }
+
+        instance = self._make_one(datasource='items')
+        instance.on_fetched(result)
+
+        documents = result['_items']
+
+        expected_links = {
+            'self': {'href': 'link/to/item_123', 'title': 'Item'}
+        }
+        self.assertEqual(documents[0].get('_links'), expected_links)
+
+        expected_links = {
+            'self': {'href': 'link/to/item_555', 'title': 'Item'}
+        }
+        self.assertEqual(documents[1].get('_links'), expected_links)
+
+    def test_sets_collection_self_link_to_relative_original_url(self):
+        result = {
+            '_items': [],
+            '_links': {
+                'self': {'href': 'foo/bar/baz'}
+            }
+        }
+
+        request_url = 'items?start_date=1975-12-31#foo'
+        with self.app.test_request_context(request_url):
+            instance = self._make_one(datasource='items')
+            instance.on_fetched(result)
+
+        self_link = result.get('_links', {}).get('self', {}).get('href')
+        self.assertEqual(self_link, 'items?start_date=1975-12-31')
+
+
+class GetUriMethodTestCase(ItemsServiceTestCase):
+    """Tests for the _get_uri() helper method."""
+
+    def setUp(self):
+        super().setUp()
+
+        self.app = Flask(__name__)
+        self.app.config['PUBLICAPI_URL'] = 'http://api.com'
+        self.app.config['URLS'] = {
+            'items': 'items_endpoint',
+            'packages': 'packages_endpoint'
+        }
+
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+
+    def tearDown(self):
+        self.app_context.pop()
+        super().tearDown()
+
+    def test_generates_correct_uri_for_non_composite_items(self):
+        document = {
+            '_id': 'foo:bar',
+            'type': 'picture'
+        }
+
+        instance = self._make_one(datasource='items')
+        result = instance._get_uri(document)
+
+        self.assertEqual(result, 'http://api.com/items_endpoint/foo%3Abar')
+
+    def test_generates_correct_uri_for_composite_items(self):
+        document = {
+            '_id': 'foo:bar',
+            'type': 'composite'
+        }
+
+        instance = self._make_one(datasource='items')
+        result = instance._get_uri(document)
+
+        self.assertEqual(result, 'http://api.com/packages_endpoint/foo%3Abar')

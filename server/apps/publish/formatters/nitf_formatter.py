@@ -22,29 +22,31 @@ class NITFFormatter(Formatter):
     """
     XML_ROOT = '<?xml version="1.0"?><!DOCTYPE nitf SYSTEM "../dtd/nitf-3-2.dtd">'
 
-    def format(self, article, destination):
+    def format(self, article, subscriber):
         try:
+            pub_seq_num = superdesk.get_resource_service('subscribers').generate_sequence_number(subscriber)
 
-            pub_seq_num = superdesk.get_resource_service('output_channels').generate_sequence_number(destination)
-
-            nitf = etree.Element("nitf")
-            head = SubElement(nitf, "head")
-            body = SubElement(nitf, "body")
-            body_head = SubElement(body, "body.head")
-            body_content = SubElement(body, "body.content")
-            body_content.text = article['body_html']
-            body_end = SubElement(body, "body.end")
-
-            etree.Element('doc-id', attrib={'id-string': article['guid']})
-
-            self.__append_meta(article, head, destination, pub_seq_num)
-            self.__format_head(article, head)
-            self.__format_body_head(article, body_head)
-            self.__format_body_end(article, body_end)
-
-            return pub_seq_num, self.XML_ROOT + str(etree.tostring(nitf))
+            nitf = self.get_nitf(article, subscriber, pub_seq_num)
+            return [(pub_seq_num, self.XML_ROOT + etree.tostring(nitf).decode('utf-8'))]
         except Exception as ex:
-            raise FormatterError.nitfFormatterError(ex, destination)
+            raise FormatterError.nitfFormatterError(ex, subscriber)
+
+    def get_nitf(self, article, destination, pub_seq_num):
+        nitf = etree.Element("nitf")
+        head = SubElement(nitf, "head")
+        body = SubElement(nitf, "body")
+        body_head = SubElement(body, "body.head")
+        body_content = SubElement(body, "body.content")
+        body_content.text = article['body_html']
+        body_end = SubElement(body, "body.end")
+
+        etree.Element('doc-id', attrib={'id-string': article['guid']})
+
+        self.__append_meta(article, head, destination, pub_seq_num)
+        self.__format_head(article, head)
+        self.__format_body_head(article, body_head)
+        self.__format_body_end(article, body_end)
+        return nitf
 
     def __format_head(self, article, head):
         title = SubElement(head, 'title')
@@ -90,8 +92,8 @@ class NITFFormatter(Formatter):
             tagline = SubElement(body_end, 'tagline')
             tagline.text = article['ednote']
 
-    def can_format(self, format_type, article_type):
-        return format_type == 'nitf' and article_type in ['text', 'preformatted', 'composite']
+    def can_format(self, format_type, article):
+        return format_type == 'nitf' and article['type'] in ['text', 'preformatted', 'composite']
 
     def __append_meta(self, article, head, destination, pub_seq_num):
         """

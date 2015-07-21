@@ -38,7 +38,6 @@ from re import findall
 from eve.utils import ParsedRequest
 import shutil
 from apps.dictionaries.resource import DICTIONARY_FILE
-import pprint
 
 external_url = 'http://thumbs.dreamstime.com/z/digital-nature-10485007.jpg'
 
@@ -54,13 +53,31 @@ def test_json(context):
     return response_data
 
 
+def test_key_is_present(key, context, response):
+    """Test if given key is present in response.
+
+    In case the context value is empty - "", {}, [] - it checks if it's non empty in response.
+
+    If it's set in context to false, it will check that it's falsy/empty in response too.
+
+    :param key
+    :param context
+    :param response
+    """
+    assert not isinstance(context[key], bool) or \
+        not response[key], \
+        '"%s" should be empty or false, but it was "%s" in (%s)' % (key, response[key], response)
+
+
 def json_match(context_data, response_data):
     if isinstance(context_data, dict):
+        assert isinstance(response_data, dict), 'response data is not dict, but %s' % type(response_data)
         for key in context_data:
             if key not in response_data:
                 print(key, ' not in ', response_data)
                 return False
-            if not context_data[key]:
+            if context_data[key] == "__any_value__":
+                test_key_is_present(key, context_data, response_data)
                 continue
             if not json_match(context_data[key], response_data[key]):
                 return False
@@ -158,7 +175,7 @@ def patch_current_user(context, data):
 
 def apply_placeholders(context, text):
     placeholders = getattr(context, 'placeholders', {})
-    for placeholder in findall('#([^#]+)#', text):
+    for placeholder in findall('#([^#"]+)#', text):
         if placeholder not in placeholders:
             try:
                 resource_name, field_name = placeholder.lower().split('.', maxsplit=1)
@@ -413,7 +430,7 @@ def when_we_get_dictionary(context, dictionary_id):
 
 
 @then('we get latest')
-def steo_impl_we_get_latest(context):
+def step_impl_we_get_latest(context):
     data = get_json_data(context.response)
     href = get_self_href(data, context)
     headers = if_match(context, data.get('_etag'))
@@ -531,7 +548,7 @@ def step_impl_when_restore_version(context, version):
     data = get_json_data(context.response)
     href = get_self_href(data, context)
     headers = if_match(context, data.get('_etag'))
-    text = '{"type": "text", "old_version": %s, "last_version": %s}' % (version, data.get('_version'))
+    text = '{"type": "text", "old_version": %s, "last_version": %s}' % (version, data.get('_current_version'))
     context.response = context.client.put(get_prefixed_url(context.app, href), data=text, headers=headers)
     assert_ok(context.response)
 
@@ -616,10 +633,13 @@ def step_impl_then_get_new(context):
         return test_json(context)
 
 
-@then('we get next take')
-def step_impl_then_get_next_take(context):
-    data = step_impl_then_get_new(context)
-    set_placeholder(context, 'TAKE', data['_id'])
+@then('we get next take as "{new_take}"')
+def step_impl_then_get_next_take(context, new_take):
+    step_impl_we_get_latest(context)
+    data = get_json_data(context.response)
+    set_placeholder(context, new_take, data['_id'])
+    set_placeholder(context, 'TAKE_PACKAGE', data['takes']['_id'])
+    test_json(context)
 
 
 @then('we get error {code}')
@@ -635,17 +655,12 @@ def step_impl_then_get_list(context, total_count):
     data = get_json_data(context.response)
     int_count = int(total_count.replace('+', ''))
 
-    if int_count == 0 or not context.text:
-        return
-
     if '+' in total_count:
         assert int_count <= data['_meta']['total'], '%d items is not enough' % data['_meta']['total']
     else:
         assert int_count == data['_meta']['total'], 'got %d' % (data['_meta']['total'])
-
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(data)
-    test_json(context)
+    if context.text:
+        test_json(context)
 
 
 @then('we get no "{field}"')
@@ -941,7 +956,7 @@ def step_impl_then_file(context):
 @then('we get version {version}')
 def step_impl_then_get_version(context, version):
     assert_200(context.response)
-    expect_json_contains(context.response, {'_version': int(version)})
+    expect_json_contains(context.response, {'_current_version': int(version)})
 
 
 @then('the field "{field}" value is "{value}"')
@@ -1107,6 +1122,11 @@ def we_get_embedded_items(context):
     assert len(context.response_data['items']['view_items']) == 2
 
 
+@when('we reset notifications')
+def step_when_we_reset_notifications(context):
+    context.app.notification_client.reset()
+
+
 @then('we get notifications')
 def then_we_get_notifications(context):
     notifications = context.app.notification_client.messages
@@ -1124,6 +1144,7 @@ def get_default_prefs(context):
 
 @when('we spike "{item_id}"')
 def step_impl_when_spike_url(context, item_id):
+    item_id = apply_placeholders(context, item_id)
     res = get_res('/archive/' + item_id, context)
     headers = if_match(context, res.get('_etag'))
 
@@ -1150,13 +1171,15 @@ def step_impl_when_unspike_url(context, item_id):
                                             data='{}', headers=headers)
 
 
-@then('we get spiked content "{id}"')
-def get_spiked_content(context, id):
-    url = 'archive/{0}'.format(id)
+@then('we get spiked content "{item_id}"')
+def get_spiked_content(context, item_id):
+    item_id = apply_placeholders(context, item_id)
+    url = 'archive/{0}'.format(item_id)
     when_we_get_url(context, url)
     assert_200(context.response)
     response_data = json.loads(context.response.get_data())
     assert_equal(response_data['state'], 'spiked')
+    assert_equal(response_data['operation'], 'spike')
 
 
 @then('we get unspiked content "{id}"')
@@ -1166,6 +1189,7 @@ def get_unspiked_content(context, id):
     assert_200(context.response)
     response_data = json.loads(context.response.get_data())
     assert_equal(response_data['state'], 'draft')
+    assert_equal(response_data['operation'], 'unspike')
     # Tolga Akin (05/11/14)
     # Expiry value doesn't get set to None properly in Elastic.
     # Discussed with Petr so we'll look into this later
@@ -1371,6 +1395,15 @@ def then_field_is_populated(context, field_name):
     assert resp[field_name].get('user', None) is not None, 'item is not populated'
 
 
+@when('we delete publish filter "{name}"')
+def step_delete_publish_filter(context, name):
+    with context.app.test_request_context(context.app.config['URL_PREFIX']):
+        filter = get_resource_service('publish_filters').find_one(req=None, name=name)
+        url = '/publish_filters/{}'.format(filter['_id'])
+        headers = if_match(context, filter.get('_etag'))
+        context.response = context.client.delete(get_prefixed_url(context.app, url), headers=headers)
+
+
 @when('we publish "{item_id}" with "{pub_type}" type and "{state}" state')
 def step_impl_when_publish_url(context, item_id, pub_type, state):
     item_id = apply_placeholders(context, item_id)
@@ -1382,6 +1415,11 @@ def step_impl_when_publish_url(context, item_id, pub_type, state):
     data = json.dumps(context_data)
     context.response = context.client.patch(get_prefixed_url(context.app, '/archive/{}/{}'.format(pub_type, item_id)),
                                             data=data, headers=headers)
+    resp = parse_json_response(context.response)
+    linked_packages = resp.get('linked_in_packages', [])
+    if linked_packages:
+        take_package = linked_packages[0].get('package', '')
+        set_placeholder(context, 'archive.{}.take_package'.format(item_id), take_package)
 
 
 @then('the ingest item is routed based on routing scheme and rule "{rule_name}"')
@@ -1423,12 +1461,6 @@ def validate_routed_item(context, rule_name, is_routed, is_transformed=False):
                 assert item[0]['task']['desk'] == str(destination['desk'])
                 assert item[0]['task']['stage'] == str(destination['stage'])
                 assert item[0]['state'] == state
-
-                if destination.get('destination_groups'):
-                    context_data = [str(g) for g in destination.get('destination_groups', [])]
-                    response_data = item[0]['destination_groups']
-                    assert_equal(json_match(context_data, response_data), True,
-                                 msg=str(context_data) + '\n != \n' + str(response_data))
 
                 if is_transformed:
                     assert item[0]['abstract'] == 'Abstract has been updated'
@@ -1508,13 +1540,20 @@ def logout(context):
 
 @then('we get "{url}" and match')
 def we_get_and_match(context, url):
+    url = apply_placeholders(context, url)
     response_data = get_res(url, context)
     context_data = json.loads(apply_placeholders(context, context.text))
     assert_equal(json_match(context_data, response_data), True,
                  msg=str(context_data) + '\n != \n' + str(response_data))
 
 
+@then('there is no "{key}" in response')
+def there_is_no_key_in_response(context, key):
+    data = get_json_data(context.response)
+    assert key not in data, 'key "%s" is in %s' % (key, data)
+
+
 @then('there is no "{key}" in "{namespace}" preferences')
-def there_is_no_key_in(context, key, namespace):
+def there_is_no_key_in_preferences(context, key, namespace):
     data = get_json_data(context.response)['user_preferences']
     assert key not in data[namespace], 'key "%s" is in %s' % (key, data[namespace])

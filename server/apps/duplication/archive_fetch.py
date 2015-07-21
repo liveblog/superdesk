@@ -16,7 +16,8 @@ import superdesk
 
 from apps.archive.archive import SOURCE as ARCHIVE
 from apps.archive.common import item_url, generate_guid, GUID_TAG, generate_unique_id_and_name, INGEST_ID, FAMILY_ID, \
-    remove_unwanted, set_original_creator, insert_into_versions
+    remove_unwanted, set_original_creator, insert_into_versions, ITEM_OPERATION,\
+    item_operations
 from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
 from superdesk.notification import push_notification
 from superdesk.resource import Resource, build_custom_hateoas
@@ -27,6 +28,8 @@ from superdesk import get_resource_service
 
 custom_hateoas = {'self': {'title': 'Archive', 'href': '/archive/{_id}'}}
 STATE_FETCHED = 'fetched'
+ITEM_FETCH = 'fetch'
+item_operations.extend([ITEM_FETCH])
 
 
 class FetchResource(Resource):
@@ -36,13 +39,7 @@ class FetchResource(Resource):
     schema = {
         'desk': Resource.rel('desks', False, required=True),
         'stage': Resource.rel('stages', False, nullable=True),
-        'macro': {
-            'type': 'string'
-        },
-        'destination_groups': {
-            'type': 'list',
-            'schema': Resource.rel('destination_groups', True)
-        }
+        'macro': {'type': 'string'}
     }
 
     url = 'ingest/<{0}:id>/fetch'.format(item_url)
@@ -88,19 +85,18 @@ class FetchService(BaseService):
             id_of_fetched_items.append(new_id)
             dest_doc['_id'] = new_id
             dest_doc['guid'] = new_id
-            dest_doc['destination_groups'] = doc.get('destination_groups')
             generate_unique_id_and_name(dest_doc)
 
             dest_doc[config.VERSION] = 1
-            send_to(dest_doc, desk_id, stage_id)
+            send_to(doc=dest_doc, desk_id=desk_id, stage_id=stage_id)
             dest_doc[config.CONTENT_STATE] = doc.get('state', STATE_FETCHED)
             dest_doc[INGEST_ID] = dest_doc[FAMILY_ID] = ingest_doc['_id']
+            dest_doc[ITEM_OPERATION] = ITEM_FETCH
 
             remove_unwanted(dest_doc)
             set_original_creator(dest_doc)
             self.__fetch_items_in_package(dest_doc, desk_id, stage_id,
-                                          doc.get('state', STATE_FETCHED),
-                                          doc.get('destination_groups'))
+                                          doc.get('state', STATE_FETCHED))
 
             get_resource_service(ARCHIVE).post([dest_doc])
             insert_into_versions(doc=dest_doc)
@@ -112,13 +108,13 @@ class FetchService(BaseService):
 
         return id_of_fetched_items
 
-    def __fetch_items_in_package(self, dest_doc, desk, stage, state, destination_groups):
+    def __fetch_items_in_package(self, dest_doc, desk, stage, state):
         for ref in [ref for group in dest_doc.get('groups', [])
                     for ref in group.get('refs', []) if 'residRef' in ref]:
             ref['location'] = ARCHIVE
 
         refs = [{'_id': ref.get('residRef'), 'desk': desk,
-                 'stage': stage, 'state': state, 'destination_groups': destination_groups}
+                 'stage': stage, 'state': state}
                 for group in dest_doc.get('groups', [])
                 for ref in group.get('refs', []) if 'residRef' in ref]
 

@@ -10,8 +10,11 @@
 
 
 import os
+import pymongo
 import unittest
 import elasticsearch
+import logging
+
 from app import get_app
 from base64 import b64encode
 from flask import json
@@ -38,23 +41,34 @@ test_user = {
             'category': 'notifications',
             'enabled': True}
     }
-
 }
+
+
+def get_mongo_uri(key, dbname):
+    """Read mongo uri from env variable and replace dbname.
+
+    :param key: env variable name
+    :param dbname: mongo db name to use
+    """
+    env_uri = os.environ.get(key, 'mongodb://localhost/test')
+    env_host = env_uri.rsplit('/', 1)[0]
+    return '/'.join([env_host, dbname])
 
 
 def get_test_settings():
     test_settings = {}
     test_settings['ELASTICSEARCH_URL'] = ELASTICSEARCH_URL
     test_settings['ELASTICSEARCH_INDEX'] = 'sptest'
-    test_settings['MONGO_DBNAME'] = 'sptests'
-    test_settings['LEGAL_ARCHIVE_DBNAME'] = 'sptests_legal'
+    test_settings['MONGO_URI'] = get_mongo_uri('MONGO_URI', 'sptests')
+    test_settings['PUBLICAPI_MONGO_URI'] = get_mongo_uri('PUBLICAPI_MONGO_URI', 'sptests')
+    test_settings['LEGAL_ARCHIVE_URI'] = get_mongo_uri('LEGAL_ARCHIVE_URI', 'sptests_legal')
     test_settings['DEBUG'] = True
     test_settings['TESTING'] = True
     test_settings['SUPERDESK_TESTING'] = True
     test_settings['BCRYPT_GENSALT_WORK_FACTOR'] = 4
     test_settings['CELERY_ALWAYS_EAGER'] = 'True'
     test_settings['CONTENT_EXPIRY_MINUTES'] = 99
-
+    test_settings['VERSION'] = '_current_version'
     return test_settings
 
 
@@ -70,8 +84,11 @@ def drop_elastic(app):
 def drop_mongo(app):
     with app.app_context():
         try:
-            app.data.mongo.pymongo().cx.drop_database(app.config['MONGO_DBNAME'])
-            app.data.mongo.pymongo().cx.drop_database(app.config['LEGAL_ARCHIVE_DBNAME'])
+            app.data.mongo.pymongo(prefix='MONGO').cx.drop_database(app.config['MONGO_DBNAME'])
+            app.data.mongo.pymongo(prefix='LEGAL_ARCHIVE').cx.drop_database(app.config['LEGAL_ARCHIVE_DBNAME'])
+        except pymongo.errors.ConnectionFailure:
+            raise ValueError('Invalid mongo config or server is down (uri=%s db=%s)' %
+                             (app.config['MONGO_URI'], app.config['MONGO_DBNAME']))
         except AttributeError:
             pass
 
@@ -82,6 +99,12 @@ def setup(context=None, config=None):
         app_config.update(config)
 
     app = get_app(app_config)
+    logger = logging.getLogger('superdesk')
+    logger.setLevel(logging.ERROR)
+    logger = logging.getLogger('elasticsearch')
+    logger.setLevel(logging.ERROR)
+    logger = logging.getLogger('urllib3')
+    logger.setLevel(logging.ERROR)
     drop_elastic(app)
     drop_mongo(app)
 

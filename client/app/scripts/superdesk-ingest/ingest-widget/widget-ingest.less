@@ -5,10 +5,11 @@
 @import 'variables.less';
 
 .sd-widget {
-	&.ingest, &.archive, &.related-item {
+	&.ingest, &.archive, &.related-item, &.aggregate {
 		.widget-header {
 			z-index: 1;
 			background: @white;
+			box-sizing: border-box;
 
 		}
 		.widget-content {
@@ -347,7 +348,7 @@
 			}
 
 			.main-list {
-				top: 44px
+				top: 48px
 			}
 
 			.ingest-list-holder {

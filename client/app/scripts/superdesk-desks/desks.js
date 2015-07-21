@@ -16,6 +16,16 @@
 
         var userDesks;
 
+        function sorted(result) {
+            var items = result._items || [];
+            items.sort(compareNames);
+            return items;
+
+            function compareNames(a, b) {
+                return a.name.localeCompare(b.name);
+            }
+        }
+
         desks.initialize()
         .then(function() {
             $scope.desks = desks.desks;
@@ -30,7 +40,7 @@
         $scope.online_users = false;
 
         api('roles').query().then(function(result) {
-            $scope.roles = result._items;
+            $scope.roles = sorted(result);
         });
 
         $scope.privileges = privileges.privileges;
@@ -52,7 +62,7 @@
         };
 
         $scope.openDeskView = function(desk, target) {
-            desks.setCurrentDesk(desk);
+            desks.setCurrentDeskId(desk._id);
             superdesk.intent('view', target);
         };
 
@@ -63,8 +73,8 @@
         });
     }
 
-    StageItemListDirective.$inject = ['search', 'api', 'superdesk', 'desks', '$timeout', '$q', '$location', '$anchorScroll'];
-    function StageItemListDirective(search, api, superdesk, desks, $timeout, $q, $location, $anchorScroll) {
+    StageItemListDirective.$inject = ['search', 'api', 'superdesk', 'desks', 'cards', '$timeout', '$q', '$location', '$anchorScroll'];
+    function StageItemListDirective(search, api, superdesk, desks, cards, $timeout, $q, $location, $anchorScroll) {
         return {
             templateUrl: 'scripts/superdesk-desks/views/stage-item-list.html',
             scope: {
@@ -72,21 +82,25 @@
                 total: '=',
                 allowed: '=',
                 showEmpty: '=?',
+                maxItems: '=?',
                 selected: '=?',
                 action: '&',
                 filter: '='
             },
             link: function(scope, elem) {
 
+                var criteria;
+
                 scope.page = 1;
                 scope.fetching = false;
                 scope.cacheNextItems = [];
                 scope.cachePreviousItems = [];
-                var query = search.query({});
-                var criteria = {source: query.getCriteria()};
 
                 scope.preview = function(item) {
                     desks.setWorkspace(item.task.desk, item.task.stage);
+                    if (!sessionStorage.getItem('previewUrl')) {
+                        sessionStorage.setItem('previewUrl', $location.url());
+                    }
                     superdesk.intent('read_only', 'content_article', item);
                 };
 
@@ -96,17 +110,7 @@
                 };
 
                 function queryItems(queryString) {
-                    query = search.query({});
-                    query.filter({term: {'task.stage': scope.stage}});
-                    query.size(25);
-
-                    if (queryString) {
-                        query.filter({query: {query_string: {
-                            query: queryString,
-                            lenient: false
-                        }}});
-                    }
-                    criteria = {source: query.getCriteria()};
+                    criteria = cards.criteria(scope.stage, queryString);
                     scope.loading = true;
                     scope.items = scope.total = null;
                     api('archive').query(criteria).then(function(items) {
@@ -118,12 +122,11 @@
                     })['finally'](function() {
                         scope.loading = false;
                     });
-
                 }
 
                 scope.$watch('filter', queryItems);
                 scope.$on('task:stage', function(event, data) {
-                    if (data.new_stage === scope.stage || data.old_stage === scope.stage) {
+                    if (scope.stage && (data.new_stage === scope.stage || data.old_stage === scope.stage)) {
                         queryItems();
                     }
                 });
@@ -197,7 +200,7 @@
                         $timeout(function() {
                             scope.items.unshift.apply(scope.items, scope.cachePreviousItems);
                             if (scope.items.length > 0) {
-                                scrollList(scope.items[parseInt(((scope.items.length - 1) / 2), 10)]._id);
+                                scrollList(scope.items[parseInt(((scope.items.length - 1) / 2), scope.maxItems || 10)]._id);
                             }
                         }, 100);
 
@@ -389,8 +392,6 @@
             $scope.desk.edit = null;
         };
 
-        $(document).on('hidden.bs.modal', '.modal', function () { $scope.modalActive = false; });
-
         $scope.remove = function(desk) {
             modal.confirm(gettext('Please confirm you want to delete desk.')).then(
                 function runConfirmed() {
@@ -402,6 +403,8 @@
                         function(response) {
                             if (angular.isDefined(response.data._message)) {
                                 notify.error(gettext('Error: ' + response.data._message));
+                            } else {
+                                notify.error(gettext('Unknown Error: There was a problem, desk was not deleted.'));
                             }
                         }
                     );
@@ -410,82 +413,11 @@
         };
     }
 
-    AggregateWidgetCtrl.$inject = ['desks', 'preferencesService'];
-    function AggregateWidgetCtrl(desks, preferencesService) {
-
-        var PREFERENCES_KEY = 'agg:view';
-
-        this.configured = false;
-        this.selected = null;
-        this.active = {};
-
-        this.setConfigured = function() {
-            this.configured = _.keys(this.active).length > 0;
-        };
-
-        desks.initialize()
-        .then(angular.bind(this, function() {
-            return preferencesService.get(PREFERENCES_KEY)
-                .then(angular.bind(this, function(active) {
-                    this.active = active != null ? active.active : {};
-                    this.setConfigured();
-                }));
-        }))
-        .then(angular.bind(this, function() {
-            return desks.fetchCurrentUserDesks()
-                .then(angular.bind(this, function (deskList) {
-                    this.desks = deskList;
-                    this.deskStages = desks.deskStages;
-                }));
-        }));
-
-        this.preview = function(item) {
-            this.selected = item;
-        };
-
-        this.closeModal = function() {
-            this.modalActive = false;
-        };
-
-        this.edit = function() {
-            this.oldActive = this.active;
-            this.active = _.create(this.active);
-            this.modalActive = true;
-        };
-
-        this.cancel = function() {
-            this.active = this.oldActive;
-            this.closeModal();
-        };
-
-        this.isActive = angular.bind(this, function(item) {
-            if (this.searchAll || !this.configured) {
-                return true;
-            }
-
-            return !!this.active[item._id];
-        });
-
-        this.save = function() {
-            var updates = {};
-            updates[PREFERENCES_KEY] = {active: this.active};
-            preferencesService.update(updates, PREFERENCES_KEY)
-                .then(angular.bind(this, function() {
-                    this.setConfigured();
-                    this.closeModal();
-                }));
-        };
-
-        this.search = function(query) {
-            this.query = query;
-        };
-
-        this.searchAll = false;
-    }
-
     var app = angular.module('superdesk.desks', [
         'superdesk.users',
-        'superdesk.authoring.widgets'
+        'superdesk.authoring.widgets',
+        'superdesk.aggregate.widgets',
+        'superdesk.aggregate'
     ]);
 
     var limits = {
@@ -522,18 +454,6 @@
                 }
             });
         }])
-        .config(['authoringWidgetsProvider', function(authoringWidgetsProvider) {
-            authoringWidgetsProvider
-                .widget('aggregate', {
-                    icon: 'view',
-                    label: gettext('Aggregate'),
-                    template: 'scripts/superdesk-desks/views/aggregate-widget.html',
-                    side: 'left',
-                    extended: true,
-                    display: {authoring: true, packages: false}
-                });
-        }])
-        .controller('AggregateWidgetCtrl', AggregateWidgetCtrl)
         .factory('desks', ['$q', 'api', 'preferencesService', 'userList', 'notify', 'session',
             function($q, api, preferencesService, userList, notify, session) {
 
@@ -649,29 +569,19 @@
                      * Fetch current user desks and make sure active desk is present in there
                      */
                     fetchCurrentUserDesks: function() {
-                        if (userDesks) {
-                            return $q.when(userDesks);
+                        var self = this;
+                        if (self.userDesks) {
+                            return $q.when(self.userDesks);
                         }
 
-                        if (!userDesksPromise) {
-                            userDesksPromise = this.fetchCurrentDeskId() // make sure there will be current desk
+                        return this.fetchCurrentDeskId() // make sure there will be current desk
                                 .then(angular.bind(session, session.getIdentity))
                                 .then(angular.bind(this, this.fetchUserDesks))
                                 .then(angular.bind(this, function(desks) {
-                                    userDesks = desks;
-                                    if (desks._items.length) {
-                                        if (!this.activeDeskId || !_.find(desks._items, {_id: this.activeDeskId})) {
-                                            this.activeDeskId = desks._items[0]._id;
-                                        }
-                                    } else if (this.activeDeskId) {
-                                        this.activeDeskId = null;
-                                    }
+                                    self.userDesks = desks;
                                     setActive(this);
                                     return desks;
                                 }));
-                        }
-
-                        return userDesksPromise;
                     },
 
                     fetchCurrentDeskId: function() {
@@ -681,9 +591,11 @@
                         }
 
                         return preferencesService.get('desk:last_worked').then(function(result) {
-                            if (angular.isDefined(result) && result !== '') {
+                            self.activeDeskId = null;
+                            if (angular.isDefined(result)) {
                                 self.activeDeskId = result;
                             }
+                            return self.activeDeskId;
                         });
                     },
                     fetchCurrentStageId: function() {
@@ -699,11 +611,15 @@
                         });
                     },
                     getCurrentDeskId: function() {
-                        if (this.activeDeskId === 'personal') {
-                            return '';
-                        } else {
-                            return this.activeDeskId;
+                        if (!this.userDesks || !this.userDesks._items || this.userDesks._items.length === 0) {
+                            return null;
                         }
+
+                        if (!this.activeDeskId || !_.find(this.userDesks._items, {_id: this.activeDeskId})) {
+                            return this.userDesks._items[0]._id;
+                        }
+
+                        return this.activeDeskId;
                     },
                     setCurrentDeskId: function(deskId) {
                         if (this.activeDeskId !== deskId) {
@@ -712,7 +628,7 @@
                             setActive(this);
                             preferencesService.update({
                                 'desk:last_worked': this.activeDeskId,
-                                'stage:items': [this.activeStageId]
+                                'stage:items': []
                             }, 'desk:last_worked');
                         }
                     },
@@ -729,21 +645,11 @@
                             }, 'desk:last_worked');
                         }
                     },
-                    fetchCurrentDesk: function() {
-                        return api.desks.getById(this.getCurrentDeskId());
-                    },
                     fetchDeskById: function(Id) {
                         return api.desks.getById(Id);
                     },
-                    setCurrentDesk: function(desk) {
-                        this.setCurrentDeskId(desk ? desk._id : null);
-                    },
                     getCurrentDesk: function() {
-                        if (!this.activeDeskId || this.activeDeskId === 'personal') {
-                            return {'_id': 'personal'};
-                        } else {
-                            return this.deskLookup[this.activeDeskId];
-                        }
+                        return this.deskLookup[this.getCurrentDeskId()] || null;
                     },
                     setWorkspace: function(deskId, stageId) {
                         deskId = deskId || null;
@@ -932,6 +838,8 @@
                                 var origDesk = _.find(scope.desks._items, {_id: scope.desk.edit._id});
                                 _.extend(origDesk, scope.desk.edit);
                             }
+
+                            desks.deskLookup[scope.desk.edit._id] = scope.desk.edit;
                             WizardHandler.wizard('desks').next();
                         }, errorMessage);
                     };
@@ -963,8 +871,8 @@
                 }
             };
         }])
-        .directive('sdDeskeditStages', ['gettext', 'api', 'WizardHandler', 'tasks', '$rootScope', 'desks', 'notify',
-            function(gettext, api, WizardHandler, tasks, $rootScope, desks, notify) {
+        .directive('sdDeskeditStages', ['gettext', 'api', 'WizardHandler', 'tasks', '$rootScope', 'desks', 'notify', 'macros',
+            function(gettext, api, WizardHandler, tasks, $rootScope, desks, notify, macros) {
             return {
 
                 link: function(scope, elem, attrs) {
@@ -974,6 +882,12 @@
                     scope.limits = limits;
 
                     scope.statuses = tasks.statuses;
+
+                    if (scope.desk.edit && scope.desk.edit._id) {
+                        macros.getByDesk(scope.desk.edit.name).then(function(macros) {
+                            scope.macros = macros;
+                        });
+                    }
 
                     scope.$watch('step.current', function(step, previous) {
                         if (step === 'stages') {
@@ -988,10 +902,11 @@
 
                     scope.getstages = function(previous) {
                         if (scope.desk.edit && scope.desk.edit._id) {
-                            scope.message = null;
+                            scope.message = 'loading...';
                             api('stages').query({where: {desk: scope.desk.edit._id}})
                                 .then(function(result) {
                                     scope.stages = result._items;
+                                    scope.message = null;
                                 });
                         } else {
                             WizardHandler.wizard('desks').goTo(previous);
@@ -1226,12 +1141,13 @@
                         if (step === 'people') {
                             scope.search = null;
                             scope.deskMembers = [];
-                            scope.message = null;
+                            scope.message = 'loading...';
 
                             if (scope.desk.edit && scope.desk.edit._id) {
                                 desks.fetchUsers().then(function(result) {
                                     scope.users = desks.users._items;
                                     scope.deskMembers = desks.deskMembers[scope.desk.edit._id] || [];
+                                    scope.message = null;
                                 });
                             } else {
                                 WizardHandler.wizard('desks').goTo(previous);
@@ -1295,8 +1211,7 @@
                 scope: {
                     desk: '=',
                     stage: '=',
-                    macro: '=',
-                    destinationGroups: '='
+                    macro: '='
                 },
                 templateUrl: 'scripts/superdesk-desks/views/actionpicker.html',
                 link: function(scope, elem, attrs) {
@@ -1323,7 +1238,13 @@
                     });
                 }
             };
-        }]);
+        }])
+        .directive('sdStageHeader', StageHeaderDirective)
+        ;
+
+    function StageHeaderDirective() {
+        return {templateUrl: 'scripts/superdesk-desks/views/stage-header.html'};
+    }
 
     return app;
 })();

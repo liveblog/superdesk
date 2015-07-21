@@ -178,7 +178,7 @@
                 }
             };
         }])
-        .directive('sdMediaMetadata', ['userList', 'adminPublishSettingsService', function(userList, adminPublishSettingsService) {
+        .directive('sdMediaMetadata', ['userList', function(userList) {
             return {
                 scope: {
                     item: '='
@@ -191,7 +191,6 @@
                     function reloadData() {
                         scope.originalCreator = null;
                         scope.versionCreator = null;
-                        scope.destinationGroups = null;
 
                         if (scope.item.original_creator) {
                             userList.getUser(scope.item.original_creator)
@@ -205,17 +204,11 @@
                                 scope.versionCreator = user.display_name;
                             });
                         }
-                        if (scope.item.destination_groups) {
-                            adminPublishSettingsService.fetchDestinationGroupsByIds(scope.item.destination_groups)
-                            .then(function(result) {
-                                scope.destinationGroups = result._items;
-                            });
-                        }
                     }
                 }
             };
         }])
-        .directive('sdMediaRelated', ['familyService', function(familyService) {
+        .directive('sdMediaRelated', ['familyService', 'superdesk', function(familyService, superdesk) {
             return {
                 scope: {
                     item: '='
@@ -228,10 +221,13 @@
                             scope.relatedItems = items;
                         });
                     });
+                    scope.open = function(item) {
+                        superdesk.intent('read_only', 'content_article', item);
+                    };
                 }
             };
         }])
-        .directive('sdFetchedDesks', ['familyService', function(familyService) {
+        .directive('sdFetchedDesks', ['desks', 'familyService', '$location', function(desks, familyService, $location) {
             return {
                 scope: {
                     item: '='
@@ -246,6 +242,11 @@
                                 });
                         }
                     });
+
+                    scope.selectFetched = function (desk) {
+                        desks.setCurrentDeskId(desk.desk._id);
+                        $location.path('/workspace/content').search('_id=' + desk.itemId);
+                    };
                 }
             };
         }])
@@ -284,7 +285,7 @@
                 }
             };
         }])
-        .directive('sdMediaBox', ['lock', 'multi', function(lock, multi) {
+        .directive('sdMediaBox', ['$location', 'lock', 'multi', function($location, lock, multi) {
             return {
                 restrict: 'A',
                 templateUrl: 'scripts/superdesk-archive/views/media-box.html',
@@ -339,18 +340,14 @@
 
                     scope.clickAction =  function clickAction(item) {
                         if (typeof scope.preview === 'function') {
+                            $location.search('fetch', null);
                             return scope.preview(item);
                         }
                         return false;
                     };
 
-                    // here we make a copy which we can modify without affecting data
-                    scope.multi = angular.extend({
-                        selected: multi.isSelected(scope.item)
-                    }, scope.item);
-
-                    scope.toggleSelected = function() {
-                        multi.toggle(scope.multi);
+                    scope.toggleSelected = function(item) {
+                        multi.toggle(item);
                     };
                 }
             };
@@ -518,7 +515,7 @@
                     _.each(items._items, function(i) {
                         if (i.task && i.task.desk && desks.deskLookup[i.task.desk]) {
                             if (deskIdList.indexOf(i.task.desk) < 0) {
-                                deskList.push({'desk': desks.deskLookup[i.task.desk], 'count': 1});
+                                deskList.push({'desk': desks.deskLookup[i.task.desk], 'count': 1, 'itemId': i._id});
                                 deskIdList.push(i.task.desk);
                             } else {
                                 deskList[deskIdList.indexOf(i.task.desk)].count += 1;

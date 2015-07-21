@@ -21,12 +21,12 @@ from superdesk.celery_app import update_key
 from superdesk.utc import utcnow, get_expiry_date
 from settings import SERVER_DOMAIN
 from superdesk import get_resource_service
+from apps.content import metadata_schema
 from superdesk.workflow import set_default_state, is_workflow_state_transition_valid
 import superdesk
 from apps.archive.archive import SOURCE as ARCHIVE
 from apps.content import PACKAGE_TYPE, TAKES_PACKAGE
 from superdesk.errors import SuperdeskApiError, IdentifierGenerationError
-
 
 GUID_TAG = 'tag'
 GUID_FIELD = 'guid'
@@ -40,15 +40,23 @@ MAIN_GROUP = 'main'
 ROOT_GROUP = 'root'
 SEQUENCE = 'sequence'
 PUBLISH_STATES = ['published', 'killed', 'corrected', 'scheduled']
+CUSTOM_HATEOAS = {'self': {'title': 'Archive', 'href': '/archive/{_id}'}}
+ITEM_OPERATION = 'operation'
+ITEM_CREATE = 'create'
+ITEM_UPDATE = 'update'
+ITEM_RESTORE = 'restore'
+ITEM_DUPLICATE = 'duplicate'
+ITEM_DESCHEDULE = 'deschedule'
+item_operations = [ITEM_CREATE, ITEM_UPDATE, ITEM_RESTORE, ITEM_DUPLICATE, ITEM_DESCHEDULE]
 
 
 def update_version(updates, original):
     """Increment version number if possible."""
-    if '_version' in updates and original.get('version', 0) == 0:
-        updates.setdefault('version', updates['_version'])
+    if config.VERSION in updates and original.get('version', 0) == 0:
+        updates.setdefault('version', updates[config.VERSION])
 
 
-def on_create_item(docs):
+def on_create_item(docs, repo_type=ARCHIVE):
     """Make sure item has basic fields populated."""
     for doc in docs:
         update_dates_for(doc)
@@ -58,22 +66,22 @@ def on_create_item(docs):
             doc[GUID_FIELD] = generate_guid(type=GUID_NEWSML)
 
         if 'unique_id' not in doc:
-            generate_unique_id_and_name(doc)
+            generate_unique_id_and_name(doc, repo_type)
 
         if 'family_id' not in doc:
             doc['family_id'] = doc[GUID_FIELD]
 
         set_default_state(doc, 'draft')
         doc.setdefault('_id', doc[GUID_FIELD])
+        if not doc.get(ITEM_OPERATION):
+            doc[ITEM_OPERATION] = ITEM_CREATE
 
 
 def on_duplicate_item(doc):
     """Make sure duplicated item has basic fields populated."""
+
     doc[GUID_FIELD] = generate_guid(type=GUID_NEWSML)
-
-    if 'unique_id' not in doc:
-        generate_unique_id_and_name(doc)
-
+    generate_unique_id_and_name(doc)
     doc.setdefault('_id', doc[GUID_FIELD])
 
 
@@ -83,7 +91,7 @@ def update_dates_for(doc):
 
 
 def generate_guid(**hints):
-    '''Generate a GUID based on given hints'''
+    """Generate a GUID based on given hints"""
     newsml_guid_format = 'urn:newsml:%(domain)s:%(timestamp)s:%(identifier)s'
     tag_guid_format = 'tag:%(domain)s:%(year)d:%(identifier)s'
 
@@ -141,7 +149,7 @@ aggregations = {
     'type': {'terms': {'field': 'type'}},
     'desk': {'terms': {'field': 'task.desk'}},
     'stage': {'terms': {'field': 'task.stage'}},
-    'category': {'terms': {'field': 'anpa-category.name'}},
+    'category': {'terms': {'field': 'anpa_category.name'}},
     'source': {'terms': {'field': 'source'}},
     'state': {'terms': {'field': 'state'}},
     'urgency': {'terms': {'field': 'urgency'}},
@@ -151,14 +159,17 @@ aggregations = {
 }
 
 
-def generate_unique_id_and_name(item):
+def generate_unique_id_and_name(item, repo_type=ARCHIVE):
     """
     Generates and appends unique_id and unique_name to item.
     :throws IdentifierGenerationError: if unable to generate unique_id
     """
 
     try:
-        unique_id = update_key("INGEST_SEQ", flag=True)
+        key_name = 'TEST_{}_SEQ'.format(repo_type.upper()) if superdesk.app.config.get('SUPERDESK_TESTING', False) \
+            else '{}_SEQ'.format(repo_type.upper())
+
+        unique_id = update_key(key_name, flag=True)
 
         if unique_id:
             item['unique_id'] = unique_id
@@ -316,3 +327,47 @@ def handle_existing_data(doc, pub_status_value='usable', doc_type='archive'):
 
         if doc_type == 'archive' and 'marked_for_not_publication' not in doc:
             doc['marked_for_not_publication'] = False
+
+
+def item_schema(extra=None):
+    """Create schema for item.
+
+    :param extra: extra fields to be added to schema
+    """
+    schema = {
+        'old_version': {
+            'type': 'number',
+        },
+        'last_version': {
+            'type': 'number',
+        },
+        'task': {'type': 'dict'},
+        'publish_schedule': {
+            'type': 'datetime',
+            'nullable': True
+        },
+        'marked_for_not_publication': {
+            'type': 'boolean',
+            'default': False
+        },
+        ITEM_OPERATION: {
+            'type': 'string',
+            'allowed': item_operations,
+            'index': 'not_analyzed'
+        },
+        'targeted_for': {
+            'type': 'list',
+            'nullable': True,
+            'schema': {
+                'type': 'dict',
+                'schema': {
+                    'name': {'type': 'string'},
+                    'allow': {'type': 'boolean'}
+                }
+            }
+        }
+    }
+    schema.update(metadata_schema)
+    if extra:
+        schema.update(extra)
+    return schema

@@ -3,7 +3,7 @@ var openUrl = require('./helpers/utils').open,
     content = require('./helpers/pages').content,
     authoring = require('./helpers/pages').authoring;
 
-describe('Content', function() {
+describe('Package', function() {
     'use strict';
 
     beforeEach(function(done) {
@@ -19,25 +19,6 @@ describe('Content', function() {
         authoring.save();
         authoring.showVersions();
         expect(element.all(by.css('[ng-click="openVersion(version)"]')).count()).toBe(2);
-    });
-
-    xit('edit title and description', function() {
-        workspace.switchToDesk('Personal');
-        content.setListView();
-        content.actionOnItem('Edit package', 0);
-        // Edit title and description
-        element(by.id('keyword')).clear();
-        element(by.id('keyword')).sendKeys('new keyword');
-        element(by.id('title')).clear();
-        element(by.id('title')).sendKeys('new title');
-        authoring.save();
-        authoring.close();
-        //Check saved values
-        browser.get('/#/workspace/content');
-        workspace.switchToDesk('Personal');
-        content.setListView();
-        expect(content.getItem(0).element(by.css('[title="new keyword"]')).isPresent()).toBe(true);
-        expect(content.getItem(0).element(by.css('[title="new title"]')).isPresent()).toBe(true);
     });
 
     it('reorder item on package', function() {
@@ -67,20 +48,32 @@ describe('Content', function() {
         addItemsToPackage();
 
         // package existing package
-        openUrl('/#/workspace/content');
+        workspace.openContent('/#/workspace/content');
         workspace.switchToDesk('Personal');
         content.setListView();
         content.actionOnItem('Package item', 0);
 
         // select package
-        openUrl('/#/workspace/content');
+        workspace.openContent('/#/workspace/content');
         workspace.switchToDesk('Personal');
         element.all(by.repeater('item in items')).first().click();
 
         // preview package via preview
+        browser.sleep(100);
         element.all(by.repeater('child in item')).first().click();
+        browser.sleep(100);
         expect(element(by.css('h5.lightbox-title')).getText()).toBe('package1');
+
         expect(element(by.css('.condensed-preview')).all(by.repeater('child in item')).count()).toBe(3);
+    });
+
+    it('create package from multiple items', function() {
+        workspace.switchToDesk('SPORTS DESK');
+        content.setListView();
+        content.selectItem(0);
+        content.selectItem(1);
+        content.createPackageFromItems();
+        expect(authoring.getGroupItems('MAIN').count()).toBe(2);
     });
 
     function addItemsToPackage() {

@@ -3,7 +3,6 @@ define([
     'lodash',
     'require',
     './activity-list-directive',
-    './activity-item-directive',
     './activity-chooser-directive',
     './activity-modal-directive'
 ], function(angular, _, require) {
@@ -415,11 +414,13 @@ define([
                     if (currentRoute.$$route.originalPath === '/') {
                         this.setReferrerUrl('/workspace');
                         localStorage.setItem('referrerUrl', '/workspace');
+                        sessionStorage.removeItem('previewUrl');
                     } else {
                         if (currentRoute.$$route.authoring && (!previousRoute.$$route.authoring ||
                             previousRoute.$$route._id === 'packaging')) {
                             this.setReferrerUrl(prepareUrl(previousRoute));
                             localStorage.setItem('referrerUrl', this.getReferrerUrl());
+                            sessionStorage.removeItem('previewUrl');
                         }
                     }
                 }
@@ -482,9 +483,16 @@ define([
         });
     }]);
     module.directive('sdActivityList', require('./activity-list-directive'));
-    module.directive('sdActivityItem', require('./activity-item-directive'));
+    module.directive('sdActivityItem', ActivityItemDirective);
     module.directive('sdActivityChooser', require('./activity-chooser-directive'));
     module.directive('sdActivityModal', require('./activity-modal-directive'));
+
+    ActivityItemDirective.$inject = ['asset'];
+    function ActivityItemDirective(asset) {
+        return {
+            templateUrl: asset.templateUrl('superdesk/activity/views/activity-item.html')
+        };
+    }
 
     return module;
 });

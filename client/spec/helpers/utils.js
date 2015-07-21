@@ -5,6 +5,7 @@ exports.open = openUrl;
 exports.changeUrl = changeUrl;
 exports.printLogs = printLogs;
 exports.waitForSuperdesk = waitForSuperdesk;
+exports.nav = nav;
 
 // construct url from uri and base url
 exports.constructUrl = function(base, uri) {
@@ -35,7 +36,7 @@ function changeUrl(url) {
             function(err) {
                 console.log('WARNING: catched error from waitForSuperdesk ' +
                     'in changeUrl.');
-                //return webdriver.promise.rejected(err);
+                console.log(err);
                 console.log('trying again...');
                 return browser.sleep(500).then(function() {
                     return changeUrl(url);
@@ -46,29 +47,9 @@ function changeUrl(url) {
 
 // open url and authenticate
 function openUrl(url) {
-    return browser.driver.get(browser.baseUrl)
-        .then(waitForSuperdesk)
-        .then(
-            function() {
-                return webdriver.promise.fulfilled();
-            },
-            function(err) {
-                console.log('WARNING: catched error from waitForSuperdesk ' +
-                    'in openUrl before login.');
-                return webdriver.promise.rejected(err);
-            }
-        ).then(login)
-        .then(waitForSuperdesk)
-        .then(
-            function() {
-                return changeUrl(url);
-            },
-            function(err) {
-                console.log('WARNING: catched error from waitForSuperdesk ' +
-                    'in openUrl after login.');
-                return webdriver.promise.rejected(err);
-            }
-        );
+    return browser.get(url)
+        .then(login)
+        .then(waitForSuperdesk);
 }
 
 function printLogs(prefix) {
@@ -83,15 +64,14 @@ function printLogs(prefix) {
 }
 
 var clientSideScripts = require(path.resolve('node_modules') + '/protractor/lib/clientsidescripts.js');
-function waitForAngular(opt_description) {
-    var description = opt_description ? ' - ' + opt_description : '';
-    var self = browser;
+function waitForAngular(_description) {
+    var description = _description ? ' - ' + _description : '';
 
     function doWork() {
-        return self.executeAsyncScript_(
+        return browser.executeAsyncScript_(
             clientSideScripts.waitForAngular,
             'Protractor.waitForAngular()' + description,
-            self.rootEl
+            browser.rootEl
         ).then(function(browserErr) {
             if (browserErr) {
                 throw 'Error while waiting for Protractor to ' +
@@ -142,4 +122,18 @@ function waitForSuperdesk() {
             return webdriver.promise.rejected(err);
         }
     );
+}
+
+/**
+ * Navigate to given location.
+ *
+ * Unlinke openUrl it doesn't reload the page, only changes #hash in url
+ *
+ * @param {string} location Location where to navigate without # (eg. users, workspace/content)
+ * @return {Promise}
+ */
+function nav(location) {
+    return login().then(function() {
+        browser.setLocation(location);
+    });
 }

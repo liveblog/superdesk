@@ -12,24 +12,21 @@
 import feedparser
 import requests
 
+from apps.archive.common import GUID_TAG
+from apps.archive.common import generate_guid
+
 from calendar import timegm
 from collections import namedtuple
 from datetime import datetime
 
 from superdesk.errors import IngestApiError, ParserError
-from superdesk.io import register_provider
 from superdesk.io.ingest_service import IngestService
 from superdesk.utils import merge_dicts
 
+from urllib.parse import quote as urlquote, urlsplit, urlunsplit
 
-PROVIDER = 'rss'
 
 utcfromtimestamp = datetime.utcfromtimestamp
-
-errors = [IngestApiError.apiAuthError().get_error_description(),
-          IngestApiError.apiNotFoundError().get_error_description(),
-          IngestApiError.apiGeneralError().get_error_description(),
-          ParserError.parseMessageError().get_error_description()]
 
 
 class RssIngestService(IngestService):
@@ -38,6 +35,13 @@ class RssIngestService(IngestService):
     (NOTE: it should also work with other syndicated feeds formats, too, since
     the underlying parser supports them, but for our needs RSS 2.0 is assumed)
     """
+
+    PROVIDER = 'rss'
+
+    ERRORS = [IngestApiError.apiAuthError().get_error_description(),
+              IngestApiError.apiNotFoundError().get_error_description(),
+              IngestApiError.apiGeneralError().get_error_description(),
+              ParserError.parseMessageError().get_error_description()]
 
     ItemField = namedtuple('ItemField', ['name', 'name_in_data', 'type'])
 
@@ -60,6 +64,50 @@ class RssIngestService(IngestService):
     * type - field's data type
     """
 
+    IMG_MIME_TYPES = (
+        'image/gif',
+        'image/jpeg',
+        'image/png',
+        'image/tiff',
+    )
+    """
+    Supported MIME types for ingesting external images referenced by the
+    RSS entries.
+    """
+
+    IMG_FILE_SUFFIXES = ('.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff')
+    """
+    Supported image filename extensions for ingesting (used for the
+    <media:thumbnail> tags - they lack the "type" attribute).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.auth_info = None
+
+    def prepare_href(self, url):
+        """Prepare a link to an external resource (e.g. an image file) so
+        that it can be directly used by the ingest machinery for fetching it.
+
+        If provider requires authentication, basic HTTP authentication info is
+        added to the given url, otherwise it is returned unmodified.
+
+        :param str url: the original URL as extracted from an RSS entry
+
+        :return: prepared URL
+        :rtype: str
+        """
+        if self.auth_info:
+            userinfo_part = '{}:{}@'.format(
+                urlquote(self.auth_info['username']),
+                urlquote(self.auth_info['password'])
+            )
+            scheme, netloc, path, query, fragment = urlsplit(url)
+            netloc = userinfo_part + netloc
+            url = urlunsplit((scheme, netloc, path, query, fragment))
+
+        return url
+
     def _update(self, provider):
         """Check data provider for data updates and returns new items (if any).
 
@@ -71,6 +119,12 @@ class RssIngestService(IngestService):
         :raises ParserError: if retrieved RSS data cannot be parsed
         """
         config = provider.get('config', {})
+
+        if config.get('auth_required'):
+            self.auth_info = {
+                'username': config.get('username', ''),
+                'password': config.get('password', '')
+            }
 
         try:
             xml_data = self._fetch_data(config, provider)
@@ -93,10 +147,24 @@ class RssIngestService(IngestService):
         for entry in data.entries:
             t_entry_updated = utcfromtimestamp(timegm(entry.updated_parsed))
 
-            if t_entry_updated > t_provider_updated:
-                item = self._create_item(entry, field_aliases)
-                self.add_timestamps(item)
+            if t_entry_updated <= t_provider_updated:
+                continue
+
+            item = self._create_item(entry, field_aliases)
+            self.add_timestamps(item)
+
+            # If the RSS entry references any images, create picture items from
+            # them and create a package referencing them and the entry itself.
+            # If there are no image references, treat entry as a simple text
+            # item, even if it might reference other media types, e.g. videos.
+            image_urls = self._extract_image_links(entry)
+            if image_urls:
+                image_items = self._create_image_items(image_urls, item)
+                new_items.extend(image_items)
                 new_items.append(item)
+                item = self._create_package(item, image_items)
+
+            new_items.append(item)
 
         return [new_items]
 
@@ -104,7 +172,8 @@ class RssIngestService(IngestService):
         """Fetch the latest feed data.
 
         :param dict config: RSS resource configuration
-        :param provider: data provider instance
+        :param provider: data provider instance, needed as an argument when
+            raising ingest errors
         :return: fetched RSS data
         :rtype: str
 
@@ -132,6 +201,37 @@ class RssIngestService(IngestService):
             else:
                 raise IngestApiError.apiGeneralError(
                     Exception(response.reason), provider)
+
+    def _extract_image_links(self, rss_entry):
+        """Extract URLs of all images referenced by the given RSS entry.
+
+        Images can be referenced via `<enclosure>`, `<media:thumbnail>` or
+        `<media:content>` RSS tag and must be listed among the allowed image
+        types. All other links to external media are ignored.
+
+        Duplicate URLs are omitted from the result.
+
+        :param rss_entry: parsed RSS item (entry)
+        :type rss_entry: :py:class:`feedparser.FeedParserDict`
+
+        :return: a list of all unique image URLs found (as strings)
+        """
+        img_links = set()
+
+        for link in getattr(rss_entry, 'links', []):
+            if link.get('type') in self.IMG_MIME_TYPES:
+                img_links.add(link['href'])
+
+        for item in getattr(rss_entry, 'media_thumbnail', []):
+            url = item.get('url', '')
+            if url.endswith(self.IMG_FILE_SUFFIXES):
+                img_links.add(url)
+
+        for item in getattr(rss_entry, 'media_content', []):
+            if item.get('type') in self.IMG_MIME_TYPES:
+                img_links.add(item['url'])
+
+        return list(img_links)
 
     def _create_item(self, data, field_aliases=None):
         """Create a new content item from RSS feed data.
@@ -164,5 +264,74 @@ class RssIngestService(IngestService):
 
         return item
 
+    def _create_image_items(self, image_links, text_item):
+        """Create a list of picture items that represent the external images
+        located on given URLs.
 
-register_provider(PROVIDER, RssIngestService(), errors)
+        Each created item's `firstcreated` and `versioncreated` fields are set
+        to the same value as the values of these fields in `text_item`.
+
+        :param iterable image_links: list of image URLs
+        :param dict text_item: the "main" text item the images are related to
+
+        :return: list of created image items (as dicts)
+        """
+        image_items = []
+
+        for image_url in image_links:
+            img_item = {
+                'guid': generate_guid(type=GUID_TAG),
+                'type': 'picture',
+                'firstcreated': text_item.get('firstcreated'),
+                'versioncreated': text_item.get('versioncreated'),
+                'renditions': {
+                    'baseImage': {
+                        'href': image_url
+                    }
+                }
+            }
+            image_items.append(img_item)
+
+        return image_items
+
+    def _create_package(self, text_item, image_items):
+        """Create a new content package from given content items.
+
+        The package's `main` group contains only the references to given items,
+        not the items themselves. In the list of references, the reference to
+        the text item preceeds the references to image items.
+
+        Package's `firstcreated` and `versioncreated` fields are set to values
+        of these fields in `text_item`.
+
+        :param dict text_item: item representing the text content
+        :param list image_items: list of items (dicts) representing the images
+            related to the text content
+        :return: the created content package
+        :rtype: dict
+        """
+        package = {
+            'type': 'composite',
+            'guid': generate_guid(type=GUID_TAG),
+            'firstcreated': text_item['firstcreated'],
+            'versioncreated': text_item['versioncreated'],
+            'groups': [
+                {
+                    'id': 'root',
+                    'role': 'grpRole:NEP',
+                    'refs': [{'idRef': 'main'}],
+                }, {
+                    'id': 'main',
+                    'role': 'main',
+                    'refs': [],
+                }
+            ]
+        }
+
+        item_references = package['groups'][1]['refs']
+        item_references.append({'residRef': text_item['guid']})
+
+        for image in image_items:
+            item_references.append({'residRef': image['guid']})
+
+        return package

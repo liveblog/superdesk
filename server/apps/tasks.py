@@ -11,12 +11,13 @@
 
 from eve.utils import ParsedRequest
 from eve.versioning import resolve_document_version
-from apps.archive.common import insert_into_versions, is_assigned_to_a_desk, get_expiry
+from apps.archive.common import insert_into_versions, is_assigned_to_a_desk, get_expiry,\
+    item_operations, ITEM_OPERATION, update_version
 from superdesk.resource import Resource
 from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
 from superdesk.notification import push_notification
 from superdesk.utc import utcnow
-from apps.archive.common import on_create_item, item_url, update_version
+from apps.archive.common import on_create_item, item_url
 from superdesk.services import BaseService
 from apps.content import metadata_schema
 import superdesk
@@ -30,6 +31,8 @@ from superdesk import get_resource_service
 
 task_statuses = ['todo', 'in_progress', 'done']
 default_status = 'todo'
+ITEM_SEND = 'send'
+item_operations.append(ITEM_SEND)
 
 
 def init_app(app):
@@ -38,18 +41,33 @@ def init_app(app):
     TaskResource(endpoint_name, app=app, service=service)
 
 
-def send_to(doc, desk_id=None, stage_id=None):
-    """Send item to given desk and stage.
+def compare_dictionaries(original, updates):
+    original_keys = set(original.keys())
+    updates_keys = set(updates.keys())
+    intersect_keys = original_keys.intersection(updates_keys)
+    added = list(updates_keys - original_keys)
+    modified = [o for o in intersect_keys if original[o] != updates[o]]
+    modified.extend(added)
+    return modified
 
-    :param doc: item to be sent
+
+def send_to(doc, update=None, desk_id=None, stage_id=None, user_id=None):
+    """Send item to given desk and stage.
+    Applies the outgoing and incoming macros of current and destination stages
+
+    :param doc: original document to be sent
+    :param update: updates for the document
     :param desk: id of desk where item should be sent
     :param stage: optional stage within the desk
     """
-    task = doc.get('task', {})
-    task.setdefault('desk', desk_id)
-    task.setdefault('stage', stage_id)
 
-    calculate_expiry_from = None
+    original_task = doc.setdefault('task', {})
+    current_stage = get_resource_service('stages').find_one(req=None, _id=original_task.get('stage'))
+    destination_stage = calculate_expiry_from = None
+    task = {'desk': desk_id, 'stage': stage_id, 'user': original_task.get('user') if user_id is None else user_id}
+
+    if current_stage:
+        apply_stage_rule(doc, update, current_stage, is_incoming=False)
 
     if desk_id and not stage_id:
         desk = superdesk.get_resource_service('desks').find_one(req=None, _id=desk_id)
@@ -59,20 +77,51 @@ def send_to(doc, desk_id=None, stage_id=None):
         calculate_expiry_from = desk
         task['desk'] = desk_id
         task['stage'] = desk.get('incoming_stage')
+        destination_stage = get_resource_service('stages').find_one(req=None, _id=desk.get('incoming_stage'))
 
     if stage_id:
-        stage = get_resource_service('stages').find_one(req=None, _id=stage_id)
-        if not stage:
+        destination_stage = get_resource_service('stages').find_one(req=None, _id=stage_id)
+        if not destination_stage:
             raise SuperdeskApiError.notFoundError('Invalid stage identifier %s' % stage_id)
 
-        calculate_expiry_from = stage
-        task['desk'] = stage['desk']
+        calculate_expiry_from = destination_stage
+        task['desk'] = destination_stage['desk']
         task['stage'] = stage_id
-        if stage.get('task_status'):
-            task['status'] = stage['task_status']
 
-    doc['task'] = task
-    doc['expiry'] = get_expiry(desk_or_stage_doc=calculate_expiry_from)
+    if destination_stage:
+        apply_stage_rule(doc, update, destination_stage, is_incoming=True)
+        if destination_stage.get('task_status'):
+            task['status'] = destination_stage['task_status']
+
+    if update:
+        update.setdefault('task', {})
+        update['task'].update(task)
+        update['expiry'] = get_expiry(desk_or_stage_doc=calculate_expiry_from)
+    else:
+        doc['task'].update(task)
+        doc['expiry'] = get_expiry(desk_or_stage_doc=calculate_expiry_from)
+
+
+def apply_stage_rule(doc, update, stage, is_incoming):
+    rule_type = 'incoming' if is_incoming else 'outgoing'
+    macro_type = '{}_macro'.format(rule_type)
+
+    if stage.get(macro_type):
+        try:
+            original_doc = dict(doc)
+            macro = get_resource_service('macros').get_macro_by_name(stage.get(macro_type))
+            macro['callback'](doc)
+            if update:
+                modified = compare_dictionaries(original_doc, doc)
+                for i in modified:
+                    update[i] = doc[i]
+        except Exception as ex:
+            message = 'Error:{} in {} rule:{} for stage:{}'\
+                .format(str(ex),
+                        rule_type,
+                        macro.get('label'),
+                        stage.get('name'))
+            raise SuperdeskApiError.badRequestError(message)
 
 
 class TaskResource(Resource):
@@ -155,7 +204,7 @@ class TasksService(BaseService):
         task = doc.get('task', {})
         desk_id = task.get('desk', None)
         stage_id = task.get('stage', None)
-        send_to(doc, desk_id, stage_id)
+        send_to(doc=doc, desk_id=desk_id, stage_id=stage_id)
 
     def on_create(self, docs):
         on_create_item(docs)
@@ -178,18 +227,20 @@ class TasksService(BaseService):
         self.update_times(updates)
         if is_assigned_to_a_desk(updates):
             self.__update_state(updates, original)
-        new_stage_id = updates.get('task', {}).get('stage', '')
-        old_stage_id = original.get('task', {}).get('stage', '')
+        new_stage_id = str(updates.get('task', {}).get('stage', ''))
+        old_stage_id = str(original.get('task', {}).get('stage', ''))
+        new_user_id = updates.get('task', {}).get('user', '')
         if new_stage_id and new_stage_id != old_stage_id:
-            new_stage = get_resource_service('stages').find_one(req=None, _id=new_stage_id)
-            if not new_stage:
-                raise SuperdeskApiError.notFoundError('Invalid stage identifier %s' % new_stage)
-            updates['expiry'] = get_expiry(new_stage['desk'], new_stage_id)
-            if new_stage.get('task_status'):
-                updates['task']['status'] = new_stage['task_status']
+            updates[ITEM_OPERATION] = ITEM_SEND
+            send_to(doc=original, update=updates, desk_id=None, stage_id=new_stage_id, user_id=new_user_id)
+            resolve_document_version(updates, ARCHIVE, 'PATCH', original)
         update_version(updates, original)
 
     def on_updated(self, updates, original):
+        updated = copy(original)
+        updated.update(updates)
+        if self._stage_changed(updates, original):
+            insert_into_versions(doc=updated)
         new_task = updates.get('task', {})
         old_task = original.get('task', {})
         if new_task.get('stage') != old_task.get('stage'):
@@ -201,14 +252,11 @@ class TasksService(BaseService):
                               )
         else:
             push_notification(self.datasource, updated=1)
-        updated = copy(original)
-        updated.update(updates)
 
         if is_assigned_to_a_desk(updated):
-
-            if self.__is_content_assigned_to_new_desk(original, updates):
-                insert_into_versions(original['_id'])
-
+            if self.__is_content_assigned_to_new_desk(original, updates) and \
+                    not self._stage_changed(updates, original):
+                insert_into_versions(doc=updated)
             add_activity(ACTIVITY_UPDATE, 'updated task {{ subject }} for item {{ type }}',
                          self.datasource, item=updated, subject=get_subject(updated), type=updated['type'])
 
@@ -217,5 +265,10 @@ class TasksService(BaseService):
 
     def assign_user(self, item_id, user):
         return self.patch(item_id, {'task': user})
+
+    def _stage_changed(self, updates, original):
+        new_stage_id = str(updates.get('task', {}).get('stage', ''))
+        old_stage_id = str(original.get('task', {}).get('stage', ''))
+        return new_stage_id and new_stage_id != old_stage_id
 
 superdesk.privilege(name='tasks', label='Tasks Management', description='Tasks Management')

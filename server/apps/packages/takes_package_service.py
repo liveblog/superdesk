@@ -10,20 +10,19 @@
 
 import logging
 from eve.utils import config
-from superdesk.errors import SuperdeskApiError
+from eve.versioning import resolve_document_version
+from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
 from superdesk import get_resource_service
 from apps.archive.archive import SOURCE as ARCHIVE
-from apps.content import LINKED_IN_PACKAGES, PACKAGE_TYPE, TAKES_PACKAGE, ITEM_TYPE, ITEM_TYPE_COMPOSITE, PACKAGE
-from apps.archive.common import ASSOCIATIONS, MAIN_GROUP, SEQUENCE, PUBLISH_STATES
+from apps.content import LINKED_IN_PACKAGES, PACKAGE_TYPE, TAKES_PACKAGE, ITEM_TYPE, \
+    ITEM_TYPE_COMPOSITE, PACKAGE, LAST_TAKE
+from apps.archive.common import ASSOCIATIONS, MAIN_GROUP, SEQUENCE, PUBLISH_STATES, ITEM_REF, insert_into_versions
 from .package_service import get_item_ref, create_root_group
 
-
-LAST_TAKE = 'last_take'
 logger = logging.getLogger(__name__)
 
 
 class TakesPackageService():
-
     def get_take_package_id(self, item):
         """
         Checks if the item is in a 'takes' package and returns the package id
@@ -37,11 +36,16 @@ class TakesPackageService():
             raise SuperdeskApiError.forbiddenError(message=message)
         return takes_package[0] if takes_package else None
 
-    def enhance_with_package_info(self, item):
+    def get_take_package(self, item):
         package_id = self.get_take_package_id(item)
         if package_id:
             takes_package = get_resource_service(ARCHIVE).find_one(req=None, _id=package_id)
-            item.setdefault(TAKES_PACKAGE, takes_package)
+            return takes_package
+
+    def enhance_with_package_info(self, item):
+        package = self.get_take_package(item)
+        if package:
+            item.setdefault(TAKES_PACKAGE, package)
 
     def __link_items__(self, takes_package, target, link):
         sequence = takes_package.get(SEQUENCE, 0) if takes_package else 0
@@ -53,11 +57,12 @@ class TakesPackageService():
             target_ref[SEQUENCE] = sequence
             main_group[ASSOCIATIONS].append(target_ref)
 
-        link_ref = get_item_ref(link)
-        link_ref[SEQUENCE] = self.__next_sequence__(sequence)
-        main_group[ASSOCIATIONS].append(link_ref)
-        takes_package[SEQUENCE] = link_ref[SEQUENCE]
-        takes_package[LAST_TAKE] = link['_id']
+        if link is not None:
+            link_ref = get_item_ref(link)
+            link_ref[SEQUENCE] = self.__next_sequence__(sequence)
+            main_group[ASSOCIATIONS].append(link_ref)
+            takes_package[SEQUENCE] = link_ref[SEQUENCE]
+            takes_package[LAST_TAKE] = link['_id']
 
     def __next_sequence__(self, seq):
         return seq + 1
@@ -67,7 +72,6 @@ class TakesPackageService():
         return take_info[0:take_index] if take_info[take_index + 1:].isdigit() else take_info
 
     def __copy_metadata__(self, target, to, package):
-        # TODO: length validation may be required.
         # if target is the first take hence default sequence is for first take.
         sequence = package.get(SEQUENCE, 1) if package else 1
         sequence = self.__next_sequence__(sequence)
@@ -77,22 +81,24 @@ class TakesPackageService():
         to['anpa_take_key'] = '{}={}'.format(take_key, sequence)
         if target.get(config.CONTENT_STATE) in PUBLISH_STATES:
             to['anpa_take_key'] = '{} (reopens)'.format(take_key)
-        to['_version'] = 1
+        to[config.VERSION] = 1
         to[config.CONTENT_STATE] = 'in_progress' if to.get('task', {}).get('desk', None) else 'draft'
 
         copy_from = package if (package.get(config.CONTENT_STATE) in PUBLISH_STATES) else target
-        for field in ['abstract', 'anpa-category', 'pubstatus', 'destination_groups',
-                      'slugline', 'urgency', 'subject', 'dateline']:
+        for field in ['anpa_category', 'pubstatus', 'slugline', 'urgency', 'subject', 'dateline']:
             to[field] = copy_from.get(field)
 
-    def create_takes_package(self, takes_package, target, link):
+    def package_story_as_a_take(self, target, takes_package, link):
         takes_package.update({
             ITEM_TYPE: ITEM_TYPE_COMPOSITE,
             PACKAGE_TYPE: TAKES_PACKAGE,
             'headline': target.get('headline'),
-            'slugline': target.get('slugline'),
-            'abstract': target.get('abstract')
+            'abstract': target.get('abstract'),
         })
+        for field in ['anpa-category', 'pubstatus', 'slugline', 'urgency', 'subject', 'dateline', 'publish_schedule']:
+            takes_package[field] = target.get(field)
+        takes_package.setdefault(config.VERSION, 1)
+
         create_root_group([takes_package])
         self.__link_items__(takes_package, target, link)
         archive_service = get_resource_service(ARCHIVE)
@@ -102,7 +108,8 @@ class TakesPackageService():
 
         # send the package to the desk where the first take was sent
         current_task = target.get('task')
-        tasks_service.patch(takes_package_id, {'task': current_task})
+        tasks_service.patch(takes_package_id, {'task': current_task or {}})
+        return takes_package_id
 
     def link_as_next_take(self, target, link):
         """
@@ -121,10 +128,54 @@ class TakesPackageService():
             archive_service.post([link])
 
         if not takes_package_id:
-            self.create_takes_package(takes_package, target, link)
+            takes_package_id = self.package_story_as_a_take(target, takes_package, link)
         else:
             self.__link_items__(takes_package, target, link)
             del takes_package['_id']
+            resolve_document_version(takes_package, ARCHIVE, 'PATCH', takes_package)
             archive_service.patch(takes_package_id, takes_package)
 
+        insert_into_versions(id_=takes_package_id)
+
         return link
+
+    def can_spike_takes_package_item(self, doc):
+        """
+        checks whether if the item is the last item of the takes package.
+        if the item is not the last item then raise exception
+        :param dict doc: take of a spike package
+        """
+        if doc and doc.get(LINKED_IN_PACKAGES):
+            package_id = self.get_take_package_id(doc)
+            if package_id:
+                takes_package = get_resource_service(ARCHIVE).find_one(req=None, _id=package_id)
+                return takes_package[LAST_TAKE] == doc['_id']
+
+        return True
+
+    def process_killed_takes_package(self, doc):
+        """
+        If the takes packages is killed then spike the unpublished item
+        :param dict doc: killed item
+        """
+        takes_package = self.get_take_package(doc)
+
+        if takes_package:
+            spike_service = get_resource_service('archive_spike')
+            groups = takes_package.get('groups', [])
+            if groups:
+                refs = next(group.get('refs') for group in groups if group['id'] == 'main')
+                for sequence in range(takes_package.get(SEQUENCE, 0), 0, -1):
+                    try:
+                        ref = next(ref for ref in refs if ref.get(SEQUENCE) == sequence)
+                        updates = {config.CONTENT_STATE: 'spiked'}
+                        spike_service.patch(ref[ITEM_REF], updates)
+                    except InvalidStateTransitionError:
+                        # for published items it will InvalidStateTransitionError
+                        break
+                    except SuperdeskApiError:
+                        # if not the last take
+                        break
+                    except:
+                        logger.exception("Unexpected error while spiking items of takes package")
+                        break

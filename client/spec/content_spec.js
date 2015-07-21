@@ -3,23 +3,24 @@
 
 var openUrl = require('./helpers/utils').open,
     workspace = require('./helpers/pages').workspace,
-    content = require('./helpers/content');
+    content = require('./helpers/content'),
+    authoring = require('./helpers/authoring');
 
 describe('Content', function() {
+
+    var body = element(by.tagName('body'));
 
     function selectedHeadline() {
         return element(by.binding('selected.preview.headline')).getText();
     }
 
-    beforeEach(function(done) {
-        openUrl('/#/workspace/content').then(function() {
-            workspace.switchToDesk('PERSONAL');
-        }).then(done);
+    beforeEach(function() {
+        openUrl('/#/workspace');
+        workspace.switchToDesk('PERSONAL');
         expect(element.all(by.repeater('items._items')).count()).toBe(3);
     });
 
     it('can navigate with keyboard', function() {
-        var body = $('body');
         body.sendKeys(protractor.Key.UP);
         expect(selectedHeadline()).toBe('package1');
 
@@ -37,14 +38,12 @@ describe('Content', function() {
     });
 
     it('can open search with s', function() {
-        var body = $('body');
         body.sendKeys('s');
         expect(element(by.id('search-input')).isDisplayed()).toBe(true);
     });
 
     it('can toggle view with v', function() {
-        var body = $('body'),
-            gridBtn = element.all(by.css('.view-select button')).first();
+        var gridBtn = element.all(by.css('.view-select button')).first();
 
         // reset to grid view first
         gridBtn.isDisplayed().then(function(isList) {
@@ -80,4 +79,33 @@ describe('Content', function() {
         expect(browser.getCurrentUrl()).toMatch(/multiedit$/);
         expect(element.all(by.repeater('board in boards')).count()).toBe(2);
     });
+
+    it('can create text article in a desk', function() {
+        workspace.switchToDesk('SPORTS DESK');
+        content.setListView();
+
+        element(by.className('sd-create-btn')).click();
+        element(by.id('create_text_article')).click();
+
+        authoring.writeText('Words');
+        authoring.save();
+        authoring.close();
+
+        expect(content.count()).toBe(3);
+    });
+
+    it('can create empty package in a desk', function() {
+        workspace.switchToDesk('SPORTS DESK');
+        content.setListView();
+
+        element(by.className('sd-create-btn')).click();
+        element(by.id('create_package')).click();
+
+        authoring.writeTextToHeadline('Empty Package');
+        authoring.save();
+        authoring.close();
+
+        expect(content.count()).toBe(3);
+    });
+
 });

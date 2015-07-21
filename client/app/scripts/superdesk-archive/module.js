@@ -19,8 +19,8 @@ define([
          *
          * @param {Object} item
          */
-        this.isSelected = function isSelected(item) {
-            return !!_.find(items, {_id: item._id});
+        this.isSelected = function(item) {
+            return item.selected;
         };
 
         /**
@@ -28,8 +28,7 @@ define([
          *
          * @param {Object} item
          */
-        this.toggle = function toggle(item) {
-            item.selected = !this.isSelected(item);
+        this.toggle = function(item) {
             if (item.selected) {
                 items = _.union(items, [item]);
             } else {
@@ -39,16 +38,23 @@ define([
         };
 
         /**
+         * Get list of selected items identifiers
+         */
+        this.getIds = function() {
+            return _.map(items, '_id');
+        };
+
+        /**
          * Get list of selected items
          */
-        this.getQueue = function getQueue() {
-            return _.map(items, '_id');
+        this.getItems = function() {
+            return items;
         };
 
         /**
          * Reset to empty
          */
-        this.reset = function reset() {
+        this.reset = function() {
             _.each(items, function(item) {
                 item.selected = false;
             });
@@ -72,7 +78,7 @@ define([
          *
          * @param {Object} item
          */
-        this.spike = function spike(item) {
+        this.spike = function(item) {
             return api.update(SPIKE_RESOURCE, item, {state: 'spiked'})
                 .then(function() {
                     if ($location.search()._id === item._id) {
@@ -87,11 +93,20 @@ define([
         };
 
         /**
+         * Spike given items.
+         *
+         * @param {Object} items
+         */
+        this.spikeMultiple = function spikeMultiple(items) {
+            items.forEach(this.spike);
+        };
+
+        /**
          * Unspike given item.
          *
          * @param {Object} item
          */
-        this.unspike = function unspike(item) {
+        this.unspike = function(item) {
             return api.update(UNSPIKE_RESOURCE, item, {})
                 .then(function() {
                     if ($location.search()._id === item._id) {
@@ -103,6 +118,25 @@ define([
                 ['finally'](function() {
                     item.actioning.unspike = false;
                 });
+        };
+
+        /**
+         * Unspike given items.
+         *
+         * @param {Object} items
+         */
+        this.unspikeMultiple = function unspikeMultiple(items) {
+            items.forEach(this.unspike);
+        };
+    }
+
+    ArchiveService.$inject = ['desks', 'session'];
+    function ArchiveService(desks, session) {
+        this.addTaskToArticle = function (item) {
+            if ((!item.task || !item.task.desk) && desks.activeDeskId && desks.userDesks) {
+                var currentDesk = _.find(desks.userDesks._items, {_id: desks.activeDeskId});
+                item.task = {'desk': desks.activeDeskId, 'stage': currentDesk.incoming_stage, 'user': session.identity._id};
+            }
         };
     }
 
@@ -116,7 +150,7 @@ define([
 
         .service('spike', SpikeService)
         .service('multi', MultiService)
-
+        .service('archiveService', ArchiveService)
         .config(['superdeskProvider', function(superdesk) {
             superdesk
                 .activity('/workspace/content', {
@@ -154,12 +188,11 @@ define([
                     filters: [{action: 'list', type: 'archive'}],
                     action: 'spike',
                     condition: function(item) {
-                        return (item.lock_user === null || angular.isUndefined(item.lock_user)) &&
-                        item.state !== 'killed' &&
-                        item.state !== 'published' &&
-                        item.state !== 'corrected' &&
-                        item.package_type !== 'takes';
-                    }
+                        return (item.lock_user === null || angular.isUndefined(item.lock_user));
+                    },
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).spike;
+                    }]
                 })
                 .activity('unspike', {
                     label: gettext('Unspike Item'),
@@ -172,7 +205,10 @@ define([
                         });
                     }],
                     filters: [{action: 'list', type: 'spike'}],
-                    action: 'unspike'
+                    action: 'unspike',
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).unspike;
+                    }]
                 })
                 .activity('duplicate-content', {
                     label: gettext('Duplicate'),
@@ -183,12 +219,10 @@ define([
                     filters: [{action: 'list', type: 'archive'}],
                     privileges: {duplicate: 1},
                     condition: function(item) {
-                        return (item.lock_user === null || angular.isUndefined(item.lock_user)) &&
-                            item.state !== 'killed' &&
-                            item.package_type !== 'takes';
+                        return (item.lock_user === null || angular.isUndefined(item.lock_user));
                     },
-                    additionalCondition:['desks', 'item', function(desks, item) {
-                        return desks.getCurrentDeskId() !== null;
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).duplicate;
                     }]
                 })
                 .activity('copy-content', {
@@ -213,23 +247,21 @@ define([
                     condition: function(item) {
                         return item.lock_user === null || angular.isUndefined(item.lock_user);
                     },
-                    additionalCondition:['desks', 'item', function(desks, item) {
-                        return desks.getCurrentDeskId() === null;
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).copy;
                     }]
                 })
                 .activity('New Take', {
                     label: gettext('New Take'),
-                    icon: 'copy',
+                    icon: 'plus-small',
                     filters: [{action: 'list', type: 'archive'}],
                     privileges: {archive: 1},
                     condition: function(item) {
-                        var state = (item.lock_user === null || angular.isUndefined(item.lock_user)) &&
-                            item.state !== 'killed' && (item.type === 'text' || item.type === 'preformatted') &&
-                            (angular.isUndefined(item.takes) || item.takes.last_take === item._id) &&
-                            (angular.isUndefined(item.more_coming) || !item.more_coming);
-
-                        return state;
+                        return (item.lock_user === null || angular.isUndefined(item.lock_user));
                     },
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).new_take;
+                    }],
                     controller: ['data', '$rootScope', 'desks', 'authoring', 'notify', 'superdesk',
                         function(data, $rootScope, desks, authoring, notify, superdesk) {
                             authoring.linkItem(data.item, null, desks.getCurrentDeskId())
@@ -245,19 +277,19 @@ define([
                 })
                 .activity('Re-write', {
                     label: gettext('Re-write'),
-                    icon: 'copy',
+                    icon: 'multi-star-color',
                     filters: [{action: 'list', type: 'archive'}],
                     privileges: {archive: 1},
                     condition: function(item) {
-                        return (item.lock_user === null || angular.isUndefined(item.lock_user)) &&
-                            _.contains(['published', 'corrected'], item.state) &&
-                            (item.type === 'text' || item.type === 'preformatted');
+                        return (item.lock_user === null || angular.isUndefined(item.lock_user));
                     },
-                    controller: ['data', '$location', 'api', 'notify', 'session', 'desks',
-                        function(data, $location, api, notify, session, desks) {
-                            var pick_fields = ['family_id', 'abstract', 'anpa-category',
-                                                'pubstatus', 'destination_groups',
-                                                'slugline', 'urgency', 'subject', 'dateline',
+                    additionalCondition:['authoring', 'item', function(authoring, item) {
+                        return authoring.itemActions(item).re_write;
+                    }],
+                    controller: ['data', '$location', 'api', 'notify', 'session', 'desks', 'superdesk',
+                        function(data, $location, api, notify, session, desks, superdesk) {
+                            var pick_fields = ['family_id', 'abstract', 'anpa_category',
+                                                'pubstatus', 'slugline', 'urgency', 'subject', 'dateline',
                                                 'priority', 'byline', 'dateline', 'headline'];
                             var update_item = {};
                             update_item =  _.pick(angular.extend(update_item, data.item), pick_fields);
@@ -268,11 +300,12 @@ define([
                             session.getIdentity()
                                 .then(function(user) {
                                     update_item.task.desk = user.desk? user.desk: desks.getCurrentDeskId();
+                                    update_item.state = 'in_progress';
                                     return api.archive.save({}, update_item);
                                 })
                                 .then(function(new_item) {
                                     notify.success(gettext('Update Created.'));
-                                    $location.url('/authoring/' + new_item._id);
+                                    superdesk.intent('author', 'article', new_item);
                                 }, function(response) {
                                     notify.error(gettext('Failed to generate update.'));
                                 });

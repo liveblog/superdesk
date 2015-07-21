@@ -26,12 +26,14 @@ from superdesk.storage.desk_media_storage import SuperdeskGridFSMediaStorage
 from superdesk.validator import SuperdeskValidator
 from raven.contrib.flask import Sentry
 from superdesk.errors import SuperdeskError, SuperdeskApiError
+from superdesk.io import providers
 from logging.handlers import SysLogHandler
 from settings import LOG_SERVER_ADDRESS, LOG_SERVER_PORT
 
 
-logging.basicConfig(handlers=[SysLogHandler(address=(LOG_SERVER_ADDRESS, LOG_SERVER_PORT))])
+logging.basicConfig(handlers=[logging.StreamHandler(), SysLogHandler(address=(LOG_SERVER_ADDRESS, LOG_SERVER_PORT))])
 logger = logging.getLogger('superdesk')
+logger.setLevel(logging.INFO)
 sentry = Sentry(register_signal=False, wrap_wsgi=False)
 
 
@@ -55,9 +57,7 @@ def get_app(config=None):
 
     if config['AMAZON_CONTAINER_NAME']:
         from superdesk.storage.amazon.amazon_media_storage import AmazonMediaStorage
-        from superdesk.storage.amazon.import_from_amazon import ImportFromAmazonCommand
         media_storage = AmazonMediaStorage
-        superdesk.command('import:amazon', ImportFromAmazonCommand())
 
     config['DOMAIN'] = {}
 
@@ -116,13 +116,16 @@ def get_app(config=None):
 
     app.sentry = sentry
     sentry.init_app(app)
+
+    # instantiate registered provider classes (leave non-classes intact)
+    for key, provider in providers.items():
+        providers[key] = provider() if isinstance(provider, type) else provider
+
     return app
 
 if __name__ == '__main__':
     debug = True
     host = '0.0.0.0'
     port = int(os.environ.get('PORT', '5000'))
-    superdesk.logger.setLevel(logging.INFO)
-    superdesk.logger.addHandler(logging.StreamHandler())
     app = get_app()
     app.run(host=host, port=port, debug=debug, use_reloader=debug)

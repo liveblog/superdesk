@@ -138,6 +138,13 @@ class InvalidFileType(SuperdeskError):
         super().__init__('Invalid file type %s' % type, payload={})
 
 
+class BulkIndexError(SuperdeskError):
+    """Exception raised when bulk index operation fails.."""
+
+    def __init__(self, resource=None, errors=None):
+        super().__init__('Failed to bulk index resource {} errors: {}'.format(resource, errors), payload={})
+
+
 class PrivilegeNameError(Exception):
     pass
 
@@ -179,7 +186,8 @@ class ProviderError(SuperdeskIngestError):
         2004: 'Ingest error',
         2005: 'Anpa category error',
         2006: 'Expired content could not be filtered',
-        2007: 'IPTC processing error'
+        2007: 'IPTC processing error',
+        2008: 'External source no suitable resolution found'
     }
 
     @classmethod
@@ -209,6 +217,10 @@ class ProviderError(SuperdeskIngestError):
     @classmethod
     def iptcError(cls, exception=None, provider=None):
         return ProviderError(2007, exception, provider)
+
+    @classmethod
+    def externalProviderError(cls, exception=None, provider=None):
+        return ProviderError(2008, exception, provider)
 
 
 class ParserError(SuperdeskIngestError):
@@ -387,12 +399,46 @@ class SuperdeskPublishError(SuperdeskError):
 
 class FormatterError(SuperdeskPublishError):
     _codes = {
-        7001: 'Article couldn"t be converted to NITF format'
+        7001: 'Article couldn"t be converted to NITF format',
+        7002: 'Article couldn"t be converted to AAP IPNews format',
+        7003: 'Article couldn"t be converted to ANPA',
+        7004: 'Article couldn"t be converted to NinJS',
+        7005: 'Article couldn"t be converted to NewsML 1.2 format',
+        7006: 'Article couldn"t be converted to NewsML G2 format',
+        7008: 'Article couldn"t be converted to AAP SMS format'
     }
 
     @classmethod
     def nitfFormatterError(cls, exception=None, destination=None):
         return FormatterError(7001, exception, destination)
+
+    @classmethod
+    def AAPIpNewsFormatterError(clscls, exception=None, destination=None):
+        return FormatterError(7002, exception, destination)
+
+    @classmethod
+    def AnpaFormatterError(cls, exception=None, destination=None):
+        return FormatterError(7003, exception, destination)
+
+    @classmethod
+    def ninjsFormatterError(cls, exception=None, destination=None):
+        return FormatterError(7004, exception, destination)
+
+    @classmethod
+    def newml12FormatterError(cls, exception=None, destination=None):
+        return FormatterError(7005, exception, destination)
+
+    @classmethod
+    def newmsmlG2FormatterError(cls, exception=None, destination=None):
+        return FormatterError(7006, exception, destination)
+
+    @classmethod
+    def bulletinBuilderFormatterError(cls, exception=None, destination=None):
+        return FormatterError(7007, exception, destination)
+
+    @classmethod
+    def AAPSMSFormatterError(cls, exception=None, destination=None):
+        return FormatterError(7008, exception, destination)
 
 
 class SubscriberError(SuperdeskPublishError):
@@ -409,10 +455,8 @@ class PublishQueueError(SuperdeskPublishError):
     _codes = {
         9001: 'Item could not be updated in the queue',
         9002: 'Item format could not be recognized',
-        9003: 'Destination group cannot be found',
         9004: 'Schedule information could not be processed',
         9005: 'State of the content item could not be updated',
-        9006: 'Output channel cannot be found',
         9007: 'Previous take is either not published or killed',
         9008: 'A post-publish action has happened on item',
         9009: 'Item could not be queued'
@@ -427,20 +471,12 @@ class PublishQueueError(SuperdeskPublishError):
         return PublishQueueError(9002, exception, destination)
 
     @classmethod
-    def destination_group_not_found_error(cls, exception=None, destination=None):
-        return PublishQueueError(9003, exception, destination)
-
-    @classmethod
     def bad_schedule_error(cls, exception=None, destination=None):
         return PublishQueueError(9004, exception, destination)
 
     @classmethod
     def content_update_error(cls, exception=None, destination=None):
         return PublishQueueError(9005, exception, destination)
-
-    @classmethod
-    def output_channel_not_found_error(cls, exception=None, destination=None):
-        return PublishQueueError(9006, exception, destination)
 
     @classmethod
     def previous_take_not_published_error(cls, exception=None, destination=None):
@@ -453,6 +489,10 @@ class PublishQueueError(SuperdeskPublishError):
     @classmethod
     def item_not_queued_error(cls, exception=None, destination=None):
         return PublishQueueError(9009, exception, destination)
+
+    @classmethod
+    def article_not_found_error(cls, exception=None, destination=None):
+        return PublishQueueError(9010, exception, destination)
 
 
 class PublishFtpError(SuperdeskPublishError):
@@ -478,3 +518,33 @@ class PublishEmailError(SuperdeskPublishError):
     @classmethod
     def recipientNotFoundError(cls, exception=None, destination=None):
         return PublishEmailError(11001, exception, destination)
+
+
+class PublishODBCError(SuperdeskPublishError):
+    _codes = {
+        12000: "ODBC publish error"
+    }
+
+    @classmethod
+    def odbcError(cls, exception=None, destination=None):
+        return PublishODBCError(12000, exception, destination)
+
+
+class PublishFileError(SuperdeskPublishError):
+    _codes = {
+        13000: "File publish error"
+    }
+
+    @classmethod
+    def fileSaveError(cls, exception=None, destinations=None):
+        return PublishFileError(13000, exception, destinations)
+
+
+class PublishPublicAPIError(SuperdeskPublishError):
+    _codes = {
+        14000: "Public API publish error",
+    }
+
+    @classmethod
+    def publicAPIError(cls, exception=None, destination=None):
+        return PublishPublicAPIError(14000, exception, destination)

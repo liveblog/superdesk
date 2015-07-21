@@ -10,7 +10,7 @@ define([
          *
          * Usage:
          * <div sd-search-list
-         * data-endpoint="destination_groups"
+         * data-endpoint="subscribers"
          * data-page-size="5"
          * data-label-key="name"
          * data-search-key="name"
@@ -61,6 +61,11 @@ define([
                     scope.maxPage = 0;
                     scope.items = null;
                     scope.keyword = null;
+
+                    scope.editable = true;
+                    if (scope.$parent._editable != null) {
+                        scope.editable = scope.$parent._editable;
+                    }
 
                     var _update = function() {
                         var criteria = scope.criteria || {};
@@ -121,7 +126,7 @@ define([
          *
          * Usage:
          * <div sd-search-list
-         * data-endpoint="destination_groups"
+         * data-endpoint="subscribers"
          * data-page-size="5"
          * data-label-key="name"
          * data-search-key="name"

@@ -9,12 +9,14 @@
 # at https://www.sourcefabric.org/superdesk/license
 
 
+import logging
+
+from flask import current_app as app
+from eve.utils import config
+
 from superdesk.resource import Resource
 from superdesk.services import BaseService
 from superdesk.utc import utcnow
-from flask import current_app as app
-import logging
-
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +44,25 @@ class VocabulariesService(BaseService):
         document[app.config['LAST_UPDATED']] = utcnow()
         document[app.config['DATE_CREATED']] = original[app.config['DATE_CREATED']] if original else utcnow()
         logger.info("updating vocabulary", document["_id"])
+
+    def on_fetched(self, doc):
+        """
+        Overriding to filter out inactive vocabularies and pops out 'is_active' property from the response.
+        """
+
+        for item in doc[config.ITEMS]:
+            self._filter_inactive_vocabularies(item)
+
+    def on_fetched_item(self, doc):
+        """
+        Overriding to filter out inactive vocabularies and pops out 'is_active' property from the response.
+        """
+
+        self._filter_inactive_vocabularies(doc)
+
+    def _filter_inactive_vocabularies(self, item):
+        vocs = item['items']
+        active_vocs = ({k: voc[k] for k in voc.keys() if k != 'is_active'}
+                       for voc in vocs if voc.get('is_active', True))
+
+        item['items'] = list(active_vocs)

@@ -17,8 +17,6 @@ FindReplaceDirective.$inject = ['$timeout', '$rootScope', 'editor'];
  */
 function FindReplaceDirective($timeout, $rootScope, editor) {
     return {
-        controller: function($scope) {
-        },
         link: function(scope, elem) {
             scope.to = '';
             scope.from = '';
@@ -63,6 +61,7 @@ angular.module('superdesk.authoring.find-replace', ['superdesk.editor', 'superde
                 icon: 'find-replace',
                 label: gettext('Find and Replace'),
                 template: 'scripts/superdesk-authoring/editor/views/find-replace.html',
+                order: 2,
                 side: 'right',
                 needUnlock: true,
                 display: {authoring: true, packages: false}

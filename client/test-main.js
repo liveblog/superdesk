@@ -36,6 +36,8 @@ tests.push('superdesk/ui/ui');
 tests.push('superdesk/upload/upload');
 tests.push('superdesk/list/list');
 tests.push('superdesk/keyboard/keyboard');
+tests.push('superdesk/services/storage');
+tests.push('superdesk/beta/beta');
 
 // apps
 tests.push('superdesk-authoring/authoring');
@@ -51,8 +53,11 @@ tests.push('superdesk-authoring/macros/macros');
 tests.push('superdesk-workspace/content/content');
 tests.push('superdesk-packaging/packaging');
 tests.push('superdesk-desks/desks');
+tests.push('superdesk-desks/aggregate');
+tests.push('superdesk-desks/aggregate-widget/aggregate');
 tests.push('superdesk-groups/groups');
 tests.push('superdesk-search/search');
+tests.push('superdesk-legal-archive/legal_archive');
 
 tests.push('superdesk-ingest/module');
 
@@ -69,8 +74,11 @@ tests.push('superdesk-archive/directives');
 
 tests.push('superdesk-dictionaries/dictionaries');
 tests.push('superdesk-publish/publish');
+tests.push('superdesk-publish/filters/publish-filters');
 tests.push('superdesk/editor/spellcheck/spellcheck');
 tests.push('superdesk-templates/templates');
+tests.push('superdesk-monitoring/monitoring');
+tests.push('superdesk-workspace/workspace');
 
 // libs
 tests.push('bower_components/ment.io/dist/mentio');

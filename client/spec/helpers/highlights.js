@@ -122,8 +122,8 @@ function Highlights() {
     };
 
     this.getHighlights = function(elem) {
-        return elem.all(by.repeater('h in highlights')).filter(function(elem, index) {
-            return elem.getText().then(function(text) {
+        return elem.all(by.repeater('h in highlights')).filter(function(highlight, index) {
+            return highlight.getText().then(function(text) {
                 return text;
             });
         });
@@ -145,5 +145,13 @@ function Highlights() {
 
     this.exportHighlights = function() {
         element(by.id('export')).click();
+    };
+
+    this.multiMarkHighlight = function(name) {
+        var elem = element(by.css('[class="multi-action-bar ng-scope"]'));
+        elem.element(by.className('svg-icon-add-to-list')).click();
+        browser.sleep(200);
+        elem.all(by.repeater('h in highlights')).all(by.css('[option="' + name.toUpperCase() + '"]')).click();
+        browser.sleep(200);
     };
 }

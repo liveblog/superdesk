@@ -1053,10 +1053,11 @@ header .sortbar {
 }
 
 .users-list-embed {
+	position:relative;
 	> li {
 		height: 32px;
 		line-height: 32px;
-		margin-right: 5px;
+		margin-right: -5px;
 		.avatar {
 			margin: 4px 10px 4px 4px;
 		}
@@ -1170,7 +1171,7 @@ header .sortbar {
 		margin-bottom: 6px;
 		.border-radius(3px);
 		padding: 6px 8px;
-		height: 18px;
+		min-height: 18px;
 		color: #444;
 		position: relative;
 		&:hover {
@@ -1180,6 +1181,9 @@ header .sortbar {
 			background: @sd-blue;
 			color: #fff !important;
 			.box-shadow(inset 0 2px 0 darken(@sd-blue, 10%));
+		}
+		&.inactive {
+			opacity: 0.5;
 		}
 		.dropdown {
 			margin-top: -3px;
@@ -1383,6 +1387,12 @@ header .sortbar {
 	}
 	&.state-corrected {
 		.state-color(@state-color-navy);
+	}
+	&.not-for-publication {
+		.state-color(@state-color-red);	
+	}
+	&.for-publication {
+		.state-color(@state-color-green);
 	}
 }
 
@@ -1604,6 +1614,22 @@ header .sortbar {
 	}
 }
 
+// DRAG & DROP
+// ---------------------------------------------
+.draggable-list {
+    > li {
+        background: #fff url(../../images/draggable-bg.png) repeat-y left 3px top 3px;
+        padding: 12px 14px 12px 25px;
+        margin-bottom: 10px;
+        cursor: move;
+        .box-shadow (0 1px 4px 0 rgba(0,0,0,0.2));
+        &.placeholder {
+            background: none;
+            .box-shadow(none);
+            border: 2px dashed #ebebeb;
+        }
+    }
+}
 
 
 

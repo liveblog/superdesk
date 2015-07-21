@@ -10,9 +10,12 @@
 
 
 from flask import current_app as app
-from eve.utils import document_etag, config
+from eve.utils import document_etag, config, ParsedRequest
 from superdesk.utc import utcnow
 from eve.methods.common import resolve_document_etag
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EveBackend():
@@ -55,7 +58,7 @@ class EveBackend():
 
     def create_in_mongo(self, endpoint_name, docs, **kwargs):
         for doc in docs:
-            doc.setdefault(app.config['ETAG'], document_etag(doc))
+            doc.setdefault(config.ETAG, document_etag(doc))
             self.set_default_dates(doc)
 
         backend = self._backend(endpoint_name)
@@ -76,7 +79,7 @@ class EveBackend():
         :param original: original document
         """
         # change etag on update so following request will refetch it
-        updates.setdefault(app.config['LAST_UPDATED'], utcnow())
+        updates.setdefault(config.LAST_UPDATED, utcnow())
         if config.ETAG not in updates:
             updated = original.copy()
             updated.update(updates)
@@ -120,12 +123,40 @@ class EveBackend():
             search_backend.replace(endpoint_name, id, document)
 
     def delete(self, endpoint_name, lookup):
+        """
+        Delete method to delete by using mongo query syntax
+        :param endpoint_name: Name of the endpoint
+        :param lookup: User mongo query syntax. example 1. {'_id':123}, 2. {'item_id': {'$in': [123, 234]}}
+        :returns:
+        Returns the mongo remove command response. {'n': 12, 'ok': 1}
+        """
         backend = self._backend(endpoint_name)
-        res = backend.remove(endpoint_name, lookup)
         search_backend = self._lookup_backend(endpoint_name)
-        if search_backend is not None:
-            search_backend.remove(endpoint_name, lookup)
+        docs = self.get_from_mongo(endpoint_name, lookup=lookup, req=ParsedRequest())
+        ids = [doc[config.ID_FIELD] for doc in docs]
+        res = backend.remove(endpoint_name, {config.ID_FIELD: {'$in': ids}})
+        if res and res.get('n', 0) > 0 and search_backend is not None:
+            self._remove_documents_from_search_backend(endpoint_name, ids)
+
+        if res and res.get('n', 0) == 0:
+            logger.warn("No documents for {} resource were deleted using lookup {}".format(endpoint_name, lookup))
+
         return res
+
+    def _remove_documents_from_search_backend(self, endpoint_name, ids):
+        """
+        remove documents from search backend.
+        :param endpoint_name: name of the endpoint
+        :param ids: list of ids
+        """
+        ids = [str(doc_id) for doc_id in ids]
+        batch_size = 500
+        logger.info("total documents to be removed {}".format(len(ids)))
+        for i in range(0, len(ids), batch_size):
+            batch = ids[i:i + batch_size]
+            query = {'query': {'terms': {'{}._id'.format(endpoint_name): batch}}}
+            app.data._search_backend(endpoint_name).remove(endpoint_name, query)
+            logger.info("Removed {} documents from {}.".format(len(batch), endpoint_name))
 
     def _datasource(self, endpoint_name):
         return app.data._datasource(endpoint_name)[0]
@@ -141,5 +172,5 @@ class EveBackend():
 
     def set_default_dates(self, doc):
         now = utcnow()
-        doc.setdefault(app.config['DATE_CREATED'], now)
-        doc.setdefault(app.config['LAST_UPDATED'], now)
+        doc.setdefault(config.DATE_CREATED, now)
+        doc.setdefault(config.LAST_UPDATED, now)

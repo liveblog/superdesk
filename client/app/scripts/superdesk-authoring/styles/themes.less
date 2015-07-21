@@ -39,7 +39,6 @@ body, html {
 
 .main-article {
 	width:auto;
-	overflow-y: scroll;
 	background: @white;
 	border: 1px solid #cacaca;
 	border-width:0 1px;
@@ -222,6 +221,11 @@ body, html {
 		.text-semibold();
 	}
 
+	.byline {
+		.keyword;
+		text-transform: none;
+	}
+
 	.text-editor {
 		font-size: 16px;
 		line-height: 150%;
@@ -239,6 +243,7 @@ body, html {
 
 	.headline {
 		.text-editor {
+			min-height: 33px;
 			font-size:28px;
 			line-height: 120%;
 			.text-semibold();
@@ -248,6 +253,7 @@ body, html {
 
 	.abstract {
 		.text-editor {
+			min-height: 24px;
 			font-style: italic;
 		}
 	}

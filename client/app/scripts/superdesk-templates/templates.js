@@ -16,35 +16,121 @@
 
     }
 
-    TemplatesService.$inject = ['api', '$q', 'gettext'];
-    function TemplatesService(api, $q, gettext) {
+    TemplatesService.$inject = ['api', '$q', 'gettext', 'preferencesService'];
+    function TemplatesService(api, $q, gettext, preferencesService) {
+        var PAGE_SIZE = 10;
+        var PREFERENCES_KEY = 'templates:recent';
 
         this.types = [
             {_id: 'kill', label: gettext('Kill')},
             {_id: 'create', label: gettext('Create')}
         ];
 
-        this.fetchContentTemplates = function fetchContentTemplates() {
-            return api.find('content_templates');
+        this.fetchTemplates = function fetchTemplates(page, pageSize, type, desk, keyword) {
+            page = page || 1;
+            pageSize = pageSize || PAGE_SIZE;
+
+            var criteria = {};
+            if (type !== undefined) {
+                criteria.template_type = type;
+            }
+            if (desk !== undefined) {
+                criteria.template_desk = desk;
+            }
+            if (keyword) {
+                criteria.template_name = {'$regex': keyword, '$options': '-i'};
+            }
+            var params = {
+                max_results: pageSize,
+                page: page
+            };
+            if (!_.isEmpty(criteria)) {
+                params.where = JSON.stringify({
+                    '$and': [criteria]
+                });
+            }
+            return api.content_templates.query(params)
+            .then(function(result) {
+                return result;
+            });
+        };
+
+        this.fetchTemplatesByIds = function(templateIds) {
+            if (!templateIds.length) {
+                return $q.when();
+            }
+
+            var params = {
+                max_results: PAGE_SIZE,
+                page: 1,
+                where: JSON.stringify({_id: {'$in': templateIds}})
+            };
+
+            return api.content_templates.query(params)
+            .then(function(result) {
+                if (result && result._items) {
+                    result._items.sort(function(a, b) {
+                        return templateIds.indexOf(a._id) - templateIds.indexOf(b._id);
+                    });
+                }
+                return result;
+            });
+        };
+
+        this.addRecentTemplate = function(deskId, templateId) {
+            return preferencesService.get()
+            .then(function(result) {
+                result = result || {};
+                result[PREFERENCES_KEY] = result[PREFERENCES_KEY] || {};
+                result[PREFERENCES_KEY][deskId] = result[PREFERENCES_KEY][deskId] || [];
+                _.remove(result[PREFERENCES_KEY][deskId], function(i) {
+                    return i === templateId;
+                });
+                result[PREFERENCES_KEY][deskId].unshift(templateId);
+                return preferencesService.update(result);
+            });
+        };
+
+        this.getRecentTemplateIds = function(deskId, limit) {
+            limit = limit || PAGE_SIZE;
+            return preferencesService.get()
+            .then(function(result) {
+                if (result && result[PREFERENCES_KEY] && result[PREFERENCES_KEY][deskId]) {
+                    return _.take(result[PREFERENCES_KEY][deskId], limit);
+                }
+                return [];
+            });
+        };
+
+        this.getRecentTemplates = function(deskId, limit) {
+            limit = limit || PAGE_SIZE;
+            return this.getRecentTemplateIds(deskId, limit)
+                .then(this.fetchTemplatesByIds);
         };
     }
 
-    TemplatesDirective.$inject = ['gettext', 'notify', 'api', 'templates', 'modal', 'adminPublishSettingsService'];
-    function TemplatesDirective(gettext, notify, api, templates, modal, adminPublishSettingsService) {
+    TemplatesDirective.$inject = ['gettext', 'notify', 'api', 'templates', 'modal', 'desks'];
+    function TemplatesDirective(gettext, notify, api, templates, modal, desks) {
         return {
             templateUrl: 'scripts/superdesk-templates/views/templates.html',
             link: function ($scope) {
                 $scope.content_templates = null;
                 $scope.origTemplate = null;
                 $scope.template = null;
+                $scope.desks = null;
 
                 function fetchTemplates() {
-                    templates.fetchContentTemplates().then(
-                        function(content_templates) {
-                            $scope.content_templates = content_templates;
+                    templates.fetchTemplates(1, 50).then(
+                        function(result) {
+                            $scope.content_templates = result;
                         }
                     );
                 }
+
+                desks.initialize()
+                .then(function() {
+                    $scope.desks = desks.desks;
+                });
 
                 $scope.types = templates.types;
 
@@ -72,21 +158,6 @@
 
                     $scope.item = $scope.template;
                     $scope._editable = true;
-
-                    $scope.origTemplate.destination_groups = $scope.origTemplate.destination_groups || [];
-
-                    if ($scope.origTemplate.destination_groups && $scope.origTemplate.destination_groups.length) {
-                        adminPublishSettingsService.fetchDestinationGroupsByIds($scope.origTemplate.destination_groups)
-                            .then(function(result) {
-                                var destinationGroups = [];
-                                _.each(result._items, function(item) {
-                                    destinationGroups.push(item);
-                                });
-                                $scope.vars = {destinationGroups: destinationGroups};
-                            });
-                    } else {
-                        $scope.vars = {destinationGroups: []};
-                    }
                 };
 
                 $scope.remove = function(template) {
@@ -112,15 +183,6 @@
                     $scope.vars = null;
                 };
 
-                $scope.$watch('vars', function() {
-                    if ($scope.vars && $scope.vars.destinationGroups) {
-                        var destinationGroups = _.pluck($scope.vars.destinationGroups, '_id').sort();
-                        if (!_.isEqual(destinationGroups, $scope.template.destination_groups)) {
-                            $scope.template.destination_groups = destinationGroups;
-                        }
-                    }
-                }, true);
-
                 fetchTemplates();
             }
         };
@@ -140,7 +202,7 @@
                 'genre',
                 'type',
                 'language',
-                'anpa-category',
+                'anpa_category',
                 'anpa_take_key',
                 'keywords',
                 'priority',
@@ -202,7 +264,7 @@
         }
     }
 
-    angular.module('superdesk.templates', ['superdesk.activity', 'superdesk.authoring'])
+    angular.module('superdesk.templates', ['superdesk.activity', 'superdesk.authoring', 'superdesk.preferences'])
         .service('templates', TemplatesService)
         .directive('sdTemplates', TemplatesDirective)
         .controller('CreateTemplateController', CreateTemplateController)
