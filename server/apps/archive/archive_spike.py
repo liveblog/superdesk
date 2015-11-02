@@ -10,24 +10,23 @@
 
 
 import logging
-import superdesk
 
 from flask import current_app as app
 
-
+import superdesk
 from superdesk import get_resource_service
 from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
+from superdesk.metadata.item import ITEM_STATE
 from superdesk.notification import push_notification
 from superdesk.services import BaseService
 from superdesk.utc import get_expiry_date
-from .common import get_user, item_url, is_assigned_to_a_desk
-from eve.utils import config
+from superdesk.metadata.utils import item_url
+from .common import get_user, is_assigned_to_a_desk, get_expiry
 from superdesk.workflow import is_workflow_state_transition_valid
 from apps.archive.archive import ArchiveResource, SOURCE as ARCHIVE
-from apps.tasks import get_expiry
 from apps.packages import PackageService, TakesPackageService
-from apps.archive.common import item_operations, ITEM_OPERATION
-
+from apps.archive.archive_rewrite import ArchiveRewriteService
+from apps.archive.common import item_operations, ITEM_OPERATION, is_item_in_package, set_sign_off
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +69,35 @@ class ArchiveSpikeService(BaseService):
 
     def on_update(self, updates, original):
         updates[ITEM_OPERATION] = ITEM_SPIKE
+        self._validate_item(original)
+        self._validate_take(original)
+        self._update_rewrite(original)
+        set_sign_off(updates, original=original)
+
+    def _validate_item(self, original):
+        """
+        Raises an exception if the item is linked in a non-take package, the idea being that you don't whant to
+        inadvertently remove thing from packages, this force that to be done as a conscious action.
+        :param original:
+        :raise: An exception or nothing
+        """
+        if is_item_in_package(original):
+            raise SuperdeskApiError.badRequestError(message="This item is in a package" +
+                                                            " it needs to be removed before the item can be spiked")
+
+    def _validate_take(self, original):
         takes_service = TakesPackageService()
-        if not takes_service.can_spike_takes_package_item(original):
+        if not takes_service.is_last_takes_package_item(original):
             raise SuperdeskApiError.badRequestError(message="Only last take of the package can be spiked.")
 
+    def _update_rewrite(self, original):
+        """ Removes the reference from the rewritten story in published collection """
+        rewrite_service = ArchiveRewriteService()
+        if original.get('rewrite_of') and original.get('event_id'):
+            rewrite_service._clear_rewritten_flag(original.get('event_id'), original['_id'])
+
     def update(self, id, updates, original):
-        original_state = original[config.CONTENT_STATE]
+        original_state = original[ITEM_STATE]
         if not is_workflow_state_transition_valid('spike', original_state):
             raise InvalidStateTransitionError()
 
@@ -91,7 +113,10 @@ class ArchiveSpikeService(BaseService):
             expiry_minutes = desk.get('spike_expiry', expiry_minutes)
 
         updates[EXPIRY] = get_expiry_date(expiry_minutes)
-        updates[REVERT_STATE] = item.get(app.config['CONTENT_STATE'], None)
+        updates[REVERT_STATE] = item.get(ITEM_STATE, None)
+
+        if original.get('rewrite_of'):
+            updates['rewrite_of'] = None
 
         item = self.backend.update(self.datasource, id, updates, original)
         push_notification('item:spike', item=str(item.get('_id')), user=str(user))
@@ -123,9 +148,10 @@ class ArchiveUnspikeService(BaseService):
 
     def on_update(self, updates, original):
         updates[ITEM_OPERATION] = ITEM_UNSPIKE
+        set_sign_off(updates, original=original)
 
     def update(self, id, updates, original):
-        original_state = original[config.CONTENT_STATE]
+        original_state = original[ITEM_STATE]
         if not is_workflow_state_transition_valid('unspike', original_state):
             raise InvalidStateTransitionError()
         user = get_user(required=True)
@@ -144,7 +170,7 @@ superdesk.workflow_state('spiked')
 
 superdesk.workflow_action(
     name='spike',
-    exclude_states=['spiked', 'published', 'scheduled', 'killed'],
+    exclude_states=['spiked', 'published', 'scheduled', 'corrected', 'killed'],
     privileges=['spike']
 )
 

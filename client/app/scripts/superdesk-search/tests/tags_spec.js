@@ -9,6 +9,7 @@ describe('Tag Service', function() {
 
     beforeEach(module('superdesk.search'));
     beforeEach(module('superdesk.desks'));
+    beforeEach(module('superdesk.templates-cache'));
 
     it('can populate keywords from location', inject(function($location, tags, $rootScope, desks, $q) {
         var members = null;
@@ -79,7 +80,6 @@ describe('Tag Service', function() {
         var members = null;
         $location.search([
             'type=["text","composite"]',
-            'state=["submitted","faked","madeup"]',
             'q=slugline:(FBI) (Obama) (Australia)'
         ].join('&'));
         $rootScope.$apply();
@@ -93,9 +93,36 @@ describe('Tag Service', function() {
 
         $rootScope.$digest();
         expect(members.selectedFacets.type.length).toBe(2);
-        expect(members.selectedFacets.state.length).toBe(3);
         expect(members.selectedKeywords.length).toBe(2);
         expect(members.selectedParameters.length).toBe(1);
 
+    }));
+
+    it('create tags for from desk and to desk', inject(function ($location, $rootScope, $q, tags, _desks_) {
+        var desks = _desks_;
+        desks.deskLookup = {
+            from: {
+                name: 'National'
+            },
+            to: {
+                name: 'Sport'
+            }
+        };
+
+        $location.search('from_desk', 'from-authoring');
+        $location.search('to_desk', 'to-authoring');
+
+        spyOn(desks, 'initialize').and.returnValue($q.when([]));
+
+        var tagsList = null;
+        tags.initSelectedFacets()
+            .then(function(value) {
+                tagsList = value;
+            });
+
+        $rootScope.$digest();
+        expect(tagsList.selectedParameters.length).toEqual(2);
+        expect(tagsList.selectedParameters[0]).toEqual('From Desk:National');
+        expect(tagsList.selectedParameters[1]).toEqual('To Desk:Sport');
     }));
 });

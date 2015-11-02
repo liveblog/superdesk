@@ -2,6 +2,7 @@
     'use strict';
 
     return angular.module('superdesk.archive.directives', [
+        'superdesk.filters',
         'superdesk.authoring',
         'superdesk.ingest',
         'superdesk.workflow'
@@ -86,6 +87,26 @@
                 templateUrl: 'scripts/superdesk-archive/archive-widget/item-preview.html'
             };
         }])
+        .directive('sdItemPreviewContainer', function() {
+            return {
+                template: '<div ng-if="item" sd-media-view data-item="item" data-close="close()"></div>',
+                scope: {},
+                link: function(scope) {
+                    scope.item = null;
+
+                    scope.$on('intent:preview:item', function(event, intent) {
+                        scope.item = intent.data;
+                    });
+
+                    /**
+                     * Close lightbox
+                     */
+                    scope.close = function() {
+                        scope.item = null;
+                    };
+                }
+            };
+        })
         .directive('sdMediaView', ['keyboardManager', 'packages', function(keyboardManager, packages) {
             return {
                 templateUrl: 'scripts/superdesk-archive/views/media-view.html',
@@ -178,7 +199,7 @@
                 }
             };
         }])
-        .directive('sdMediaMetadata', ['userList', function(userList) {
+        .directive('sdMediaMetadata', ['userList', 'archiveService', function(userList, archiveService) {
             return {
                 scope: {
                     item: '='
@@ -189,20 +210,22 @@
                     scope.$watch('item', reloadData);
 
                     function reloadData() {
-                        scope.originalCreator = null;
-                        scope.versionCreator = null;
+                        scope.originalCreator = scope.item.original_creator;
+                        scope.versionCreator = scope.item.version_creator;
 
-                        if (scope.item.original_creator) {
-                            userList.getUser(scope.item.original_creator)
-                            .then(function(user) {
-                                scope.originalCreator = user.display_name;
-                            });
-                        }
-                        if (scope.item.version_creator) {
-                            userList.getUser(scope.item.version_creator)
-                            .then(function(user) {
-                                scope.versionCreator = user.display_name;
-                            });
+                        if (!archiveService.isLegal(scope.item)) {
+                            if (scope.item.original_creator) {
+                                userList.getUser(scope.item.original_creator)
+                                    .then(function(user) {
+                                        scope.originalCreator = user.display_name;
+                                    });
+                            }
+                            if (scope.item.version_creator) {
+                                userList.getUser(scope.item.version_creator)
+                                    .then(function(user) {
+                                        scope.versionCreator = user.display_name;
+                                    });
+                            }
                         }
                     }
                 }
@@ -215,15 +238,27 @@
                 },
                 templateUrl: 'scripts/superdesk-archive/views/related-view.html',
                 link: function(scope, elem) {
-                    scope.$watch('item', function() {
+                    scope.$on('item:duplicate', fetchRelatedItems);
+
+                    scope.$watch('item', function(newVal, oldVal) {
+                        if (newVal !== oldVal) {
+                            fetchRelatedItems();
+                        }
+                    });
+                    scope.open = function(item) {
+                        superdesk.intent('view', 'item', item).then(null, function() {
+                            superdesk.intent('edit', 'item', item);
+                        });
+                    };
+
+                    function fetchRelatedItems() {
                         familyService.fetchItems(scope.item.family_id || scope.item._id, scope.item)
                         .then(function(items) {
                             scope.relatedItems = items;
                         });
-                    });
-                    scope.open = function(item) {
-                        superdesk.intent('read_only', 'content_article', item);
-                    };
+                    }
+
+                    fetchRelatedItems();
                 }
             };
         }])
@@ -251,7 +286,6 @@
             };
         }])
         .directive('sdMetaIngest', ['ingestSources', function(ingestSources) {
-            var promise = ingestSources.initialize();
             return {
                 scope: {
                     item: '='
@@ -265,7 +299,7 @@
                             scope.name = scope.item.source;
                         }
 
-                        promise.then(function() {
+                        ingestSources.initialize().then(function() {
                             if (scope.item.ingest_provider && scope.item.ingest_provider in ingestSources.providersLookup) {
                                 scope.name = ingestSources.providersLookup[scope.item.ingest_provider].name;
                             }
@@ -285,7 +319,7 @@
                 }
             };
         }])
-        .directive('sdMediaBox', ['$location', 'lock', 'multi', function($location, lock, multi) {
+        .directive('sdMediaBox', ['$location', 'lock', 'multi', 'archiveService', function($location, lock, multi, archiveService) {
             return {
                 restrict: 'A',
                 templateUrl: 'scripts/superdesk-archive/views/media-box.html',
@@ -349,6 +383,29 @@
                     scope.toggleSelected = function(item) {
                         multi.toggle(item);
                     };
+
+                    /**
+                     * Get actions type based on item state. Used with activity filter.
+                     *
+                     * @param {Object} item
+                     * @returns {string}
+                     */
+                    scope.getType = function(item) {
+                        return archiveService.getType(item);
+                    };
+                }
+            };
+        }])
+        .directive('sdItemCrops', ['metadata', function(metadata) {
+            return {
+                templateUrl: 'scripts/superdesk-archive/views/item-crops.html',
+                scope: {
+                    item: '='
+                },
+                link: function(scope, elem) {
+                    metadata.initialize().then(function() {
+                        scope.crop_sizes = metadata.values.crop_sizes;
+                    });
                 }
             };
         }])
@@ -478,6 +535,96 @@
                 }
             };
         })
+
+        /*
+         * This directive is only temporarly,
+         * it will be deleted with content and ingest
+         */
+        .directive('sdContentResults', ['$location', 'preferencesService', 'packages', 'tags', 'asset',
+            function ($location, preferencesService, packages, tags, asset) {
+                var update = {
+                    'archive:view': {
+                        'allowed': [
+                            'mgrid',
+                            'compact'
+                        ],
+                        'category': 'archive',
+                        'view': 'mgrid',
+                        'default': 'mgrid',
+                        'label': 'Users archive view format',
+                        'type': 'string'
+                    }
+                };
+
+                return {
+                    require: '^sdSearchContainer',
+                    templateUrl: asset.templateUrl('superdesk-search/views/search-results.html'),
+                    link: function (scope, elem, attr, controller) {
+
+                        var GRID_VIEW = 'mgrid',
+                            LIST_VIEW = 'compact';
+
+                        var multiSelectable = (attr.multiSelectable === undefined) ? false : true;
+
+                        scope.flags = controller.flags;
+                        scope.selected = scope.selected || {};
+
+                        scope.preview = function preview(item) {
+                            if (multiSelectable) {
+                                if (_.findIndex(scope.selectedList, {_id: item._id}) === -1) {
+                                    scope.selectedList.push(item);
+                                } else {
+                                    _.remove(scope.selectedList, {_id: item._id});
+                                }
+                            }
+                            scope.selected.preview = item;
+                            $location.search('_id', item ? item._id : null);
+                        };
+
+                        scope.openLightbox = function openLightbox() {
+                            scope.selected.view = scope.selected.preview;
+                        };
+
+                        scope.closeLightbox = function closeLightbox() {
+                            scope.selected.view = null;
+                        };
+
+                        scope.openSingleItem = function (packageItem) {
+                            packages.fetchItem(packageItem).then(function (item) {
+                                scope.selected.view = item;
+                            });
+                        };
+
+                        scope.setview = setView;
+
+                        var savedView;
+                        preferencesService.get('archive:view').then(function (result) {
+                            savedView = result.view;
+                            scope.view = (!!savedView && savedView !== 'undefined') ? savedView : 'mgrid';
+                        });
+
+                        scope.$on('key:v', toggleView);
+
+                        function setView(view) {
+                            scope.view = view || 'mgrid';
+                            update['archive:view'].view = view || 'mgrid';
+                            preferencesService.update(update, 'archive:view');
+                        }
+
+                        function toggleView() {
+                            var nextView = scope.view === LIST_VIEW ? GRID_VIEW : LIST_VIEW;
+                            return setView(nextView);
+                        }
+
+                        /**
+                         * Generates Identifier to be used by track by expression.
+                         */
+                        scope.generateTrackIdentifier = function(item) {
+                            return (item.state === 'ingested') ? item._id : item._id + ':' + (item._current_version || item.item_version);
+                        };
+                    }
+                };
+            }])
 
         .service('familyService', ['api', 'desks', function(api, desks) {
             this.fetchItems = function(familyId, excludeItem) {

@@ -9,8 +9,10 @@ function Content() {
 
     this.send = send;
 
-    this.setListView = function() {
-        nav('workspace/content');
+    this.setListView = function(noNavigate) {
+        if (noNavigate === undefined || !noNavigate) {
+            nav('workspace/content');
+        }
 
         var list = element(by.css('i.icon-th-list'));
         return list.isDisplayed()
@@ -42,7 +44,7 @@ function Content() {
                 // BC: get item by its index
                 return index === item;
             } else {
-                return elem.element(by.className('headline')).getText()
+                return elem.element(by.className('item-heading')).getText()
                     .then(function(text) {
                         return text.toLowerCase().indexOf(item) >= 0;
                     });
@@ -51,9 +53,45 @@ function Content() {
     };
 
     this.actionOnItem = function(action, item) {
-        var crtItem = this.getItem(item);
-        browser.actions().mouseMove(crtItem).perform();
-        return crtItem.element(by.css('[title="' + action + '"]')).click();
+        var menu = this.openItemMenu(item);
+        return menu.element(by.partialLinkText(action)).click();
+    };
+
+    this.editItem = function(item) {
+        return this.actionOnItem('Edit', item);
+    };
+
+    function waitFor(elem) {
+        return browser.wait(function() {
+            return elem.isDisplayed();
+        }, 300);
+    }
+
+    this.openItemMenu = function(item) {
+        this.getItem(item).click();
+
+        var preview = element(by.id('item-preview'));
+        waitFor(preview);
+
+        var toggle = preview.element(by.className('icon-dots-vertical'));
+        waitFor(toggle);
+
+        toggle.click();
+
+        var menu = element(by.css('.dropdown-menu.open'));
+        waitFor(menu);
+        return menu;
+    };
+
+    this.previewItem = function(item) {
+        this.getItem(item).click();
+
+        var preview = element(by.id('item-preview'));
+        waitFor(preview);
+    };
+
+    this.closePreview = function() {
+        element(by.className('close-preview')).click();
     };
 
     this.checkMarkedForHighlight = function(highlight, item) {
@@ -63,12 +101,16 @@ function Content() {
             .toContain(highlight);
     };
 
+    var list = element(by.className('list-view'));
+
     this.getCount = function () {
-        browser.wait(function() {
-            // make sure list is there before counting
-            return element(by.css('.list-view')).isPresent();
-        });
-        return element.all(by.repeater('items._items')).count();
+        waitFor(list);
+        return list.all(by.repeater('items._items')).count();
+    };
+
+    this.getItemCount = function () {
+        waitFor(list);
+        return list.all(by.repeater('item in items track by uuid(item)')).count();
     };
 
     /**
@@ -96,11 +138,20 @@ function Content() {
 
     this.createPackageFromItems = function() {
         var elem = element(by.css('[class="multi-action-bar ng-scope"]'));
-        elem.element(by.className('icon-package-plus')).click();
+        elem.element(by.className('big-icon-package-create')).click();
         browser.sleep(500);
     };
 
+    this.getWidgets = function() {
+        return element(by.className('navigation-tabs')).all(by.repeater('widget in widgets'));
+    };
+
+    this.getItemType = function(itemType) {
+        var itemTypeClass = 'filetype-icon-' + itemType;
+        return element(by.className('authoring-header__general-info')).all(by.className(itemTypeClass)).first();
+    };
+
     function send() {
-        return element(by.id('send-item-btn')).click();
+        return element(by.css('[ng-click="send()"]')).click();
     }
 }

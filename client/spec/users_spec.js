@@ -1,6 +1,9 @@
 
-var post = require('./helpers/fixtures').post;
-var openUrl = require('./helpers/utils').open;
+var authoring = require('./helpers/authoring'),
+    openUrl = require('./helpers/utils').open,
+    post = require('./helpers/fixtures').post,
+    userPrefs = require('./helpers/user_prefs'),
+    workspace = require('./helpers/workspace');
 
 describe('Users', function() {
     'use strict';
@@ -29,7 +32,7 @@ describe('Users', function() {
             expect(modelValue('user.first_name')).toBe('first name');
             expect(modelValue('user.last_name')).toBe('last name');
             expect(modelValue('user.email')).toBe('a@a.com');
-            expect(modelValue('user.sign_off')).toBe('');
+            expect(modelValue('user.sign_off')).toBe('fl');
         });
     });
 
@@ -154,6 +157,7 @@ describe('Users', function() {
             expect(buttonSave.isEnabled()).toBe(false);
             expect(buttonCancel.isEnabled()).toBe(false);
 
+            inputSignOff.clear();
             inputSignOff.sendKeys('X');
             expect(inputSignOff.getAttribute('value')).toBe('X');
 
@@ -168,8 +172,113 @@ describe('Users', function() {
 
             browser.sleep(200);
             expect(buttonSave.isEnabled()).toBe(false);
-            expect(buttonCancel.isEnabled()).toBe(false);
+            expect(buttonCancel.isEnabled()).toBe(true);
         });
+    });
+
+    describe('editing user preferences:', function () {
+        beforeEach(function(done) {
+            userPrefs.navigateTo().then(function () {
+                return userPrefs.prefsTab.click();
+            }).then(done);
+        });
+
+        it('should filter categories in the Authoring metadata head menu ' +
+           'based on the user\'s preferred categories settings',
+            function () {
+                var catListItems,  // elements in the offered category list
+                    parentDiv;
+
+                userPrefs.btnCheckNone.click();  // uncheck all categories
+
+                // select the Entertainment and Finance categories
+                userPrefs.categoryCheckboxes.get(3).click();  // Entertainment
+                userPrefs.categoryCheckboxes.get(4).click();  // Finance
+
+                userPrefs.btnSave.click();  // save changes
+
+                // navigate to Workspace and create a new article
+                workspace.openContent();
+                authoring.navbarMenuBtn.click();
+                authoring.newPlainArticleLink.click();
+
+                // authoring opened, click the set category menu and see what
+                // categories are offered
+                authoring.setCategoryBtn.click();
+
+                // it is difficult to distinguish the categories menu element
+                // from other similar menus, thus we need to perform all
+                // element selections from the button's immediate parent
+                parentDiv = authoring.setCategoryBtn.element(by.xpath('..'));
+
+                /////
+                // XXX: workaround - there seems to be a bug in sd-typeahead,
+                // no categories are shown, thus something needs to be entered
+                // into textbox (and immediately deleted) so that the category
+                // list shows up
+                /// TODO: remove when the bug is resolved and this is not needed
+                //        anymore
+                var txtCategory = parentDiv.element(by.css('input[type="text"]'));
+                txtCategory.sendKeys('x', protractor.Key.BACK_SPACE);
+                /// end workaround ///
+
+                catListItems = parentDiv.all(by.css('.item-list li > button'));
+
+                expect(catListItems.count()).toEqual(2);
+                expect(catListItems.get(0).getText()).toEqual('Entertainment');
+                expect(catListItems.get(1).getText()).toEqual('Finance');
+            }
+        );
+    });
+
+    describe('editing user privileges:', function () {
+        beforeEach(function (done) {
+            userPrefs.navigateTo().then(function () {
+                return userPrefs.privlTab.click();
+            }).then(done);
+        });
+
+        it('should reset the form to the last saved state when the Cancel ' +
+            'button is clicked',
+            function () {
+                var checkboxes = userPrefs.privlCheckboxes;
+
+                // Initially all checboxes are unchecked. Now let's select
+                // a few of them, click the Cancel button and see if they have
+                // been reset.
+                checkboxes.get(0).click();  // archive
+                checkboxes.get(2).click();  // content filters
+                expect(checkboxes.get(0).isSelected()).toBeTruthy();
+                expect(checkboxes.get(2).isSelected()).toBeTruthy();
+
+                userPrefs.btnCancel.click();
+
+                expect(checkboxes.get(0).isSelected()).toBeFalsy();
+                expect(checkboxes.get(2).isSelected()).toBeFalsy();
+
+                // Check the checkboxes again, save the changes, then check a
+                // few more. After clicking the Cancel button, only the
+                // checkboxes checked after the save should be reset.
+                checkboxes.get(0).click();
+                checkboxes.get(2).click();
+                expect(checkboxes.get(0).isSelected()).toBeTruthy();
+                expect(checkboxes.get(2).isSelected()).toBeTruthy();
+
+                userPrefs.btnSave.click();
+
+                checkboxes.get(1).click();  // archived management
+                checkboxes.get(4).click();  // desk management
+                expect(checkboxes.get(1).isSelected()).toBeTruthy();
+                expect(checkboxes.get(4).isSelected()).toBeTruthy();
+
+                userPrefs.btnCancel.click();
+
+                expect(checkboxes.get(0).isSelected()).toBeTruthy();
+                expect(checkboxes.get(2).isSelected()).toBeTruthy();
+                expect(checkboxes.get(1).isSelected()).toBeFalsy();
+                expect(checkboxes.get(4).isSelected()).toBeFalsy();
+            }
+        );
     });
 
     describe('default desk field should not be visible', function() {

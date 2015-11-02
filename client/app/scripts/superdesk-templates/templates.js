@@ -21,6 +21,32 @@
         var PAGE_SIZE = 10;
         var PREFERENCES_KEY = 'templates:recent';
 
+        this.TEMPLATE_METADATA = [
+            'headline',
+            'slugline',
+            'abstract',
+            'dateline',
+            'byline',
+            'subject',
+            'genre',
+            'type',
+            'language',
+            'anpa_category',
+            'anpa_take_key',
+            'keywords',
+            'priority',
+            'urgency',
+            'pubstatus',
+            'description',
+            'body_html',
+            'body_text',
+            'place',
+            'located',
+            'creditline',
+            'ednote',
+            'language'
+        ];
+
         this.types = [
             {_id: 'kill', label: gettext('Kill')},
             {_id: 'create', label: gettext('Create')}
@@ -109,11 +135,12 @@
         };
     }
 
-    TemplatesDirective.$inject = ['gettext', 'notify', 'api', 'templates', 'modal', 'desks'];
-    function TemplatesDirective(gettext, notify, api, templates, modal, desks) {
+    TemplatesDirective.$inject = ['gettext', 'notify', 'api', 'templates', 'modal', 'desks', 'weekdays', '$filter'];
+    function TemplatesDirective(gettext, notify, api, templates, modal, desks, weekdays, $filter) {
         return {
             templateUrl: 'scripts/superdesk-templates/views/templates.html',
             link: function ($scope) {
+                $scope.weekdays = weekdays;
                 $scope.content_templates = null;
                 $scope.origTemplate = null;
                 $scope.template = null;
@@ -122,19 +149,51 @@
                 function fetchTemplates() {
                     templates.fetchTemplates(1, 50).then(
                         function(result) {
+                            result._items = $filter('sortByName')(result._items, 'template_name');
                             $scope.content_templates = result;
                         }
                     );
                 }
 
-                desks.initialize()
-                .then(function() {
+                desks.initialize().then(function() {
                     $scope.desks = desks.desks;
                 });
+
+                /*
+                 * Returns desk name
+                 */
+                $scope.getTemplateDesk = function getTemplateDesk(template) {
+                    return _.find($scope.desks._items , {_id: template.template_desk});
+                };
+
+                /*
+                 * Returns stage name
+                 */
+                $scope.getTemplateStage = function getTemplateStage(template) {
+                    return _.find(desks.stages._items , {_id: template.template_stage});
+                };
+
+                /*
+                 * Convert string to time object
+                 *
+                 * @param {String}{%M%S} time
+                 * @return {Object} d Returns time object
+                 */
+                $scope.getTime = function getTime(time) {
+                    if (time) {
+                        var d = new Date();
+
+                        d.setUTCHours(time.substr(0, 2));
+                        d.setUTCMinutes(time.substr(2, 2));
+
+                        return d;
+                    }
+                };
 
                 $scope.types = templates.types;
 
                 $scope.save = function() {
+                    delete $scope.template._datelinedate;
                     api.content_templates.save($scope.origTemplate, $scope.template)
                         .then(
                             function() {
@@ -155,9 +214,11 @@
                 $scope.edit = function(template) {
                     $scope.origTemplate = template || {'type': 'text'};
                     $scope.template = _.create($scope.origTemplate);
+                    $scope.template.schedule = $scope.origTemplate.schedule || {};
 
                     $scope.item = $scope.template;
                     $scope._editable = true;
+                    $scope.updateStages($scope.template.template_desk);
                 };
 
                 $scope.remove = function(template) {
@@ -183,6 +244,10 @@
                     $scope.vars = null;
                 };
 
+                $scope.updateStages = function(desk) {
+                    $scope.stages = desk ? desks.deskStages[desk] : null;
+                };
+
                 fetchTemplates();
             }
         };
@@ -190,31 +255,7 @@
 
     CreateTemplateController.$inject = ['item', 'templates', 'api', 'desks', '$q'];
     function CreateTemplateController(item, templates, api, desks, $q) {
-        var vm = this,
-            metadata = [
-                'headline',
-                'slugline',
-                'abstract',
-                'dateline',
-                'byline',
-                'usage_terms',
-                'subject',
-                'genre',
-                'type',
-                'language',
-                'anpa_category',
-                'anpa_take_key',
-                'keywords',
-                'priority',
-                'urgency',
-                'pubstatus',
-                'description',
-                'body_html',
-                'body_text',
-                'place',
-                'located',
-                'creditline'
-            ];
+        var vm = this;
 
         this.type = 'create';
         this.name = item.slugline || null;
@@ -236,7 +277,7 @@
                 template_name: vm.name,
                 template_type: vm.type,
                 template_desk: vm.desk
-            }, _.pick(item, metadata));
+            }, _.pick(item, templates.TEMPLATE_METADATA));
             return api.save('content_templates', template).then(function(data) {
                 vm._issues = null;
                 return data;

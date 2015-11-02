@@ -2,7 +2,8 @@
 'use strict';
 
 var workspace = require('./helpers/workspace'),
-    authoring = require('./helpers/authoring');
+    authoring = require('./helpers/authoring'),
+    monitoring = require('./helpers/monitoring');
 
 describe('Send To', function() {
     it('can submit item to a desk', function() {
@@ -38,12 +39,24 @@ describe('Send To', function() {
                 .getText()
                 ).toBe('SUBMITTED');
     });
+
     it('can cancel submit request because there are spelling mistakes', function () {
         workspace.open();
         workspace.editItem(1);
         authoring.writeText('mispeled word');
         authoring.sendTo('Sports Desk');
         element(by.className('modal-content')).all(by.css('[ng-click="cancel()"]')).click();
-        expect(browser.getCurrentUrl()).toMatch(/authoring/);
+        expect(element(by.className('authoring-embedded')).isDisplayed()).toBe(true);
+    });
+
+    it('can open send to panel when monitoring list is hidden', function() {
+        monitoring.openMonitoring();
+        monitoring.openAction(1, 0);
+        monitoring.showHideList();
+        expect(monitoring.hasClass(element(by.id('main-container')), 'hideMonitoring')).toBe(true);
+        browser.sleep(3000);
+
+        authoring.sendToButton.click();
+        expect(authoring.sendItemContainer.isDisplayed()).toBe(true);
     });
 });

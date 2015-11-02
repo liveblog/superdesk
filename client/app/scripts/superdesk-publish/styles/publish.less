@@ -9,6 +9,31 @@
     float: right;
     margin-right: 65px;
 }
+.pull-left-20 {
+    float: left;
+    margin-left: 65px;
+}
+.panel-search {
+    float: left;
+    width: 30%;
+}
+.panel-search-result {
+    float: right;
+    width: 70%;
+    .column-width {
+        width:50%;
+    }
+}
+.panel-subscriber {
+    float: right;
+    width: 70%;   
+}
+div {
+    -webkit-column-rule: 4px outset #ff00ff; /* Chrome, Safari, Opera */
+    -moz-column-rule: 4px outset #ff00ff; /* Firefox */
+    column-rule: 4px outset #ff00ff;
+}
+
 
 .filter-result-modal {
     position: absolute;
@@ -35,66 +60,10 @@
     }
 }
 
-.publish-filter-modal {
-    position: absolute;
-    .content {
-        .field {
-            margin-bottom: 10px;
-            textarea {
-                height: 22px;
-            }
-        }
-    }
-    .destination-box {
-        margin: 8px;
-        padding: 8px;
-        background-color: #f0f0f0;
-    }
-    .modal-body {
-        .filter-tags {
-            float: left;
-            width: 100%;
-            background-color: #f0f0f0;
-            padding-left: 5px;
-            margin-bottom: 5px;
-            .header {
-                margin: 5px;
-                label {
-                    float: left;
-                }
-            }
-            .row {
-                width: 100%;
-                float: left;
-                padding-left: 5px;
-                li {
-                    float: left;
-                }
-                .row-50 {
-                    width: 50%;
-                    float: left;
-                    select {
-                        width: 70%;
-                    }
-                }
-                .meta-row {
-                    min-height: 200px;
-                }
-            }
-            
-        }
-        .test-row {
-            width: 100%;
-            float: left;
-            input {
-                width: 70%;
-            }
-        }
-    }
-    .preview {
-        float: left;
-        wifth: 100%;
-    }
+.destination-box {
+    margin: 0 0 12px 0;
+    padding: 12px 12px 0;
+    .shadow-box;
 }
 
 .subscriber-modal {
@@ -106,11 +75,6 @@
                 height: 22px;
             }
         }
-    }
-    .destination-box {
-        margin: 8px;
-        padding: 8px;
-        background-color: #f0f0f0;
     }
 
     .add {
@@ -149,6 +113,9 @@
     #multi-select-count {
         margin-left: 15px;
     }
+    .btn.btn-info {
+        margin-top: 10px !important;
+    }
 }
 
 .subnav {
@@ -161,6 +128,9 @@
     header {
         .sortbar {
             margin-left: 10px;
+            .flat-searchbar.monitoring-flat-searchbar {
+                margin-top: -12px !important;
+            }
         }
         .refresh-box {
             span {
@@ -178,6 +148,14 @@
                 &:hover {
                     .opacity(80);
                 }
+            }
+        }
+        .pagination-box {
+            .page-info {
+                float: left;
+            }
+            .btn-group {
+                position: inherit !important;
             }
         }
     }

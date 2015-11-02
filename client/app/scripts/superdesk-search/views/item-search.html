@@ -8,25 +8,25 @@
             <div class="field">
                 <label for="ingest-collection">
                     {{:: 'Ingest' | translate}}
-                    <input type="checkbox" id="ingest-collection" ng-model="repo.ingest" ng-checked="repo.ingest" tabindex="4">
+                    <input type="checkbox" id="ingest-collection" ng-model="repo.ingest" ng-checked="repo.ingest">
                 </label>
             </div>
             <div class="field">
                 <label for="archive-collection">
                     {{:: 'Production' | translate}}
-                    <input type="checkbox" id="archive-collection" ng-model="repo.archive" ng-checked="repo.archive" tabindex="5">
+                    <input type="checkbox" id="archive-collection" ng-model="repo.archive" ng-checked="repo.archive">
                 </label>
             </div>
             <div class="field">
                 <label for="published-collection">
                     {{:: 'Published' | translate}}
-                    <input type="checkbox" id="published-collection" ng-model="repo.published" ng-checked="repo.published" tabindex="6">
+                    <input type="checkbox" id="published-collection" ng-model="repo.published" ng-checked="repo.published">
                 </label>
             </div>
             <div class="field">
-                <label for="text_archive-collection">
-                    {{:: 'Text Archive' | translate}}
-                    <input type="checkbox" id="text_archive-collection" ng-model="repo.text_archive" ng-checked="repo.text_archive" tabindex="7">
+                <label for="archived-collection">
+                    {{:: 'Archived' | translate}}
+                    <input type="checkbox" id="archived-collection" ng-model="repo.archived" ng-checked="repo.archived">
                 </label>
             </div>
         </div>
@@ -39,23 +39,22 @@
             </label>
         </div>
     </fieldset>
-    <fieldset>
+    <fieldset ng-show="repo.search === 'local'">
         <div class="field">
             <label for="search-headline">
                 {{:: 'Headline' | translate}}
             </label>
             <div class="control">
-                <input type="text" id="search-headline" ng-model="meta.headline" tabindex="6">
+                <input type="text" id="search-headline" ng-model="meta.headline">
             </div>
         </div>
 
         <div class="field">
             <label for="search-slugline">
-                {{:: 'Keyword' | translate}}
-
+                {{:: 'Slugline' | translate}}
             </label>
             <div class="control">
-                <input type="text" id="search-slugline" ng-model="meta.slugline" tabindex="8">
+                <input type="text" id="search-slugline" ng-model="meta.slugline">
             </div>
         </div>
 
@@ -64,13 +63,13 @@
                 <label for="search-storyname">
                     {{:: 'Story Name' | translate}}
                 </label>
-                <input type="text" id="search-storyname" ng-model="meta.unique_name" tabindex="9">
+                <input type="text" id="search-storyname" ng-model="meta.unique_name">
             </div>
             <div class="field">
                 <label for="search-storytext">
                     {{:: 'Story Text' | translate}}
                 </label>
-                <input type="text" id="search-storytext" ng-model="meta.body_html" tabindex="10">
+                <input type="text" id="search-storytext" ng-model="meta.body_html">
             </div>
         </div>
 
@@ -78,20 +77,70 @@
             <label for="search-creator">
                 {{:: 'Creator' | translate}}
             </label>
-            <input type="text" id="search-creator" ng-model="meta.original_creator" tabindex="12">
+            <input type="text" id="search-creator" ng-model="meta.original_creator">
         </div>
 
         <div class="field">
             <label for="search-subject">
                 {{:: 'Subject' | translate}}
             </label>
-            <div class="control">
+            <div class="control" id="search-subject">
                 <div sd-meta-terms data-item="subjectitems" data-field="subject" data-unique="qcode" data-list="subjectcodes" data-change="subjectSearch(subjectitems)"></div>
             </div>
         </div>
+        <div class="field">
+            <label for="from-desk">
+                {{:: 'From Desk' | translate}}
+            </label>
+            <select
+                id="from-desk" name="from-desk"
+                ng-options="d._id as d.name for d in desks._items"
+                ng-model="selectedDesk.from" ng-change="deskSearch()">
+                <option value="" label=""></option>
+            </select>
+        </div>
+
+        <div class="field">
+            <label for="to-desk">
+                {{:: 'To Desk' | translate}}
+            </label>
+            <select
+                id="to-desk" name="to-desk"
+                ng-options="d._id as d.name for d in desks._items"
+                ng-model="selectedDesk.to" ng-change="deskSearch()">
+                <option value="" label=""></option>
+            </select>
+        </div>
+
     </fieldset>
+    <fieldset ng-show="repo.search === 'aapmm'">      
+        <div class="field">
+            <label for="search-slugline">
+                {{:: 'Slugline' | translate}}
+            </label>
+            <div class="control">
+                <input type="text" id="search-slugline" ng-model="meta.slugline">
+            </div>
+        </div>       
+        <div class="field">
+            <label for="search-decsription">
+                {{:: 'Description' | translate}}
+            </label>
+            <div class="control">
+                <input type="text" id="search-description" ng-model="meta.description">
+            </div>
+        </div>
+            <div class="field">
+            <label for="search-aapkeyword">
+                {{:: 'AAP Image Keyword' | translate}}
+            </label>
+            <div class="control">
+                <input type="text" id="search-aapkeyword" ng-model="meta.aapkeyword">
+            </div>
+        </div>       
+    </fieldset>    
 </form>
 <div class="actions">
-    <button class="btn btn-info pull-right" ng-click="search()" tabindex="13" translate>Go</button>
-    <button class="btn pull-right" ng-click="focusOnSearch();" tabindex="14" translate>Cancel</button>
+    <button class="btn btn-info pull-right" ng-click="search()" ng-disabled="!isSearchEnabled()" translate>Go</button>
+    <button class="btn pull-right" ng-click="focusOnSearch();" translate>Cancel</button>
 </div>

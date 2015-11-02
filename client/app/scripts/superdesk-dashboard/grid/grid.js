@@ -34,6 +34,7 @@ define([
                 templateUrl: require.toUrl('./views/grid.html'),
                 controller: ['$scope', function($scope) {
                     this.addWidget = function(widget, element) {
+                        widget.active = true;
                         widget.el = $scope.gridster.add_widget(
                             element,
                             widget.sizex,
@@ -45,7 +46,8 @@ define([
 
                     this.removeWidget = function(widget, element) {
                         $scope.gridster.remove_widget(element);
-                        $scope.widgets.splice(_.indexOf($scope.widgets, widget), 1);
+                        widget.active = false;
+                        $scope.syncWidgets();
                     };
 
                     this.resizeWidget = function(element, sizex, sizey) {
@@ -56,13 +58,15 @@ define([
                 link: function(scope, element, attrs) {
                     scope.syncWidgets = function() {
                         angular.forEach(scope.widgets, function(widget) {
-                            var sizes = scope.gridster.serialize(widget.el);
-                            angular.extend(widget, {
-                                row: sizes[0].row,
-                                col: sizes[0].col,
-                                sizex: sizes[0].size_x,
-                                sizey: sizes[0].size_y
-                            });
+                            if (widget.active) {
+                                var sizes = scope.gridster.serialize(widget.el);
+                                angular.extend(widget, {
+                                    row: sizes[0].row,
+                                    col: sizes[0].col,
+                                    sizex: sizes[0].size_x,
+                                    sizey: sizes[0].size_y
+                                });
+                            }
                         });
                     };
 
@@ -132,10 +136,6 @@ define([
 
                         sdGrid.resizeWidget(element, widget.sizex, widget.sizey);
                     };
-
-                    scope.$on('$destroy', function() {
-                        scope.removeWidget();
-                    });
                 }
             };
         });

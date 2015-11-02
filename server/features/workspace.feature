@@ -20,3 +20,41 @@ Feature: Workspace
         {"user": "#users._id#"}
         """
         Then we get response code 403
+
+    @auth
+    Scenario: Workspace name should be unique per user
+        When we post to "/workspaces"
+        """
+        {"user": "#CONTEXT_USER_ID#", "name": "test"}
+        """
+        And we post to "/workspaces"
+        """
+        {"user": "#CONTEXT_USER_ID#", "name": "test"}
+        """
+        Then we get response code 400
+
+    @auth
+    Scenario: Workspace name should be unique globally
+        When we post to "/workspaces"
+        """
+        {"name": "test"}
+        """
+        And we post to "/workspaces"
+        """
+        {"name": "test"}
+        """
+        Then we get response code 400
+
+    @auth
+    Scenario: Deleting workspace works
+        When we post to "/workspaces"
+        """
+        {"name": "test"}
+        """
+        And we delete latest
+        Then we get response code 204
+        When we post to "/workspaces"
+        """
+        {"name": "test"}
+        """
+        Then we get new resource

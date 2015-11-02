@@ -6,19 +6,18 @@ define([
 
     ArchiveListController.$inject = [
         '$scope', '$injector', '$location', '$q', '$timeout', 'superdesk',
-        'session', 'api', 'desks', 'ContentCtrl', 'StagesCtrl', 'notify', 'multi'
+        'session', 'api', 'desks', 'content', 'StagesCtrl', 'notify', 'multi'
     ];
-    function ArchiveListController($scope, $injector, $location, $q, $timeout, superdesk, session, api, desks, ContentCtrl,
+    function ArchiveListController($scope, $injector, $location, $q, $timeout, superdesk, session, api, desks, content,
         StagesCtrl, notify, multi) {
 
         var resource,
             self = this;
 
         $injector.invoke(BaseListController, this, {$scope: $scope});
-
         $scope.currentModule = 'archive';
         $scope.stages = new StagesCtrl($scope);
-        $scope.content = new ContentCtrl($scope);
+        $scope.content = content;
         $scope.type = 'archive';
         $scope.repo = {
             ingest: false,
@@ -61,10 +60,6 @@ define([
 
             $scope.stages.select(stage);
             multi.reset();
-        };
-
-        $scope.openUpload = function openUpload() {
-            superdesk.intent('upload', 'media');
         };
 
         this.fetchItems = function fetchItems(criteria) {
@@ -129,20 +124,12 @@ define([
         $scope.$on('item:copy', refreshItems);
         $scope.$on('item:take', refreshItems);
         $scope.$on('item:duplicate', refreshItems);
-        $scope.$on('item:created', refreshItems);
-        $scope.$on('item:updated', refreshItems);
-        $scope.$on('item:replaced', refreshItems);
+        $scope.$on('content:update', refreshItems);
         $scope.$on('item:deleted', refreshItems);
         $scope.$on('item:mark', refreshItems);
-        $scope.$on('item:spike', refreshItems);
+        $scope.$on('item:spike', reset);
         $scope.$on('item:unspike', reset);
-
-        $scope.$on('item:publish:closed:channels', function(_e, data) {
-            if (desks.activeDeskId && desks.activeDeskId === data.desk) {
-                notify.error(gettext('Item having story name ' + data.unique_name + ' published to closed Output Channel(s).'));
-                refreshItems();
-            }
-        });
+        $scope.$on('item:published:no_post_publish_actions', refreshItems);
 
         desks.fetchCurrentUserDesks().then(function() {
             // only watch desk/stage after we get current user desk

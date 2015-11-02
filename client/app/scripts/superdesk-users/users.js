@@ -2,6 +2,20 @@
     'use strict';
 
     /**
+    * Common error handler code for privilege errors
+    */
+    function privilegesErrorHandler(response) {
+        if (angular.isDefined(response.data._issues) &&
+            angular.isDefined(response.data._issues['validator exception'])) {
+            return 'Error: ' + response.data._issues['validator exception'];
+        } else if (angular.isDefined(response.data._message)) {
+            return 'Error: ' + response.data._message;
+        } else {
+            return 'Error. Privileges not updated.';
+        }
+    }
+
+    /**
      * Bussiness logic layer, should be used instead of resource
      */
     UsersService.$inject = ['api', '$q', 'notify'];
@@ -11,6 +25,7 @@
 
         usersService.usernamePattern = /^[A-Za-z0-9_.'-]+$/;
         usersService.phonePattern = /^(?:(?:0?[1-9][0-9]{8})|(?:(?:\+|00)[1-9][0-9]{9,11}))$/;
+        usersService.signOffPattern = /^[a-zA-Z0-9]+$/;
 
         /**
          * Save user with given data
@@ -147,7 +162,7 @@
                 return $q.when(value);
             } else {
                 var criteria = {
-                    max_results: perPage
+                    max_results: page * perPage
                 };
                 if (search) {
                     criteria.where = JSON.stringify({
@@ -193,8 +208,8 @@
         return userservice;
     }
 
-    UserListController.$inject = ['$scope', '$location', 'api', 'lodash'];
-    function UserListController($scope, $location, api, _) {
+    UserListController.$inject = ['$scope', '$location', 'api'];
+    function UserListController($scope, $location, api) {
         var DEFAULT_SIZE = 25;
 
         $scope.selected = {user: null};
@@ -319,8 +334,7 @@
             }
         }
 
-        $scope.$watch(getCriteria, fetchUsers, true);
-        $scope.$watch($scope.online_users, fetchUsers, true);
+        $scope.$watchCollection(getCriteria, fetchUsers);
     }
 
     UserEditController.$inject = ['$scope', 'server', 'superdesk', 'user', 'session'];
@@ -329,13 +343,13 @@
         $scope.profile = $scope.user._id === session.identity._id;
     }
 
-    ChangeAvatarController.$inject = ['$scope', 'upload', 'session', 'urls', 'betaService', 'lodash'];
-    function ChangeAvatarController($scope, upload, session, urls, beta, _) {
+    ChangeAvatarController.$inject = ['$scope', 'upload', 'session', 'urls', 'betaService'];
+    function ChangeAvatarController($scope, upload, session, urls, beta) {
 
         $scope.methods = [
             {id: 'upload', label: gettext('Upload from computer')},
-            {id: 'camera', label: gettext('Take a picture'), beta: true},
-            {id: 'web', label: gettext('Use a Web URL'), beta: true}
+            {id: 'camera', label: gettext('Take a picture')},
+            {id: 'web', label: gettext('Use a Web URL')}
         ];
 
         beta.isBeta().then(function(beta) {
@@ -458,8 +472,8 @@
             });
     }
 
-    UserRolesDirective.$inject = ['api', 'gettext', 'notify', 'modal'];
-    function UserRolesDirective(api, gettext, notify, modal) {
+    UserRolesDirective.$inject = ['api', 'gettext', 'notify', 'modal', '$filter'];
+    function UserRolesDirective(api, gettext, notify, modal, $filter) {
         return {
             scope: true,
             templateUrl: 'scripts/superdesk-users/views/settings-roles.html',
@@ -469,7 +483,7 @@
 
                 api('roles').query()
                 .then(function(result) {
-                    scope.roles = result._items;
+                    scope.roles = $filter('sortByName')(result._items);
                 });
 
                 scope.edit = function(role) {
@@ -547,16 +561,15 @@
         };
     }
 
-    RolesPrivilegesDirective.$inject = ['api', 'gettext', 'notify', '$q'];
-    function RolesPrivilegesDirective(api, gettext, notify, $q) {
+    RolesPrivilegesDirective.$inject = ['api', 'gettext', 'notify', '$q', '$filter'];
+    function RolesPrivilegesDirective(api, gettext, notify, $q, $filter) {
         return {
             scope: true,
             templateUrl: 'scripts/superdesk-users/views/settings-privileges.html',
             link: function(scope) {
 
-                api('roles').query()
-                .then(function(result) {
-                    scope.roles = result._items;
+                api('roles').query().then(function(result) {
+                    scope.roles = $filter('sortByName')(result._items);
                 });
 
                 api('privileges').query().
@@ -578,8 +591,8 @@
                     $q.all(promises).then(function() {
                         notify.success(gettext('Privileges updated.'));
                         rolesForm.$setPristine();
-                    }, function() {
-                        notify.success(gettext('Error. Privileges not updated.'));
+                    }, function(response) {
+                        notify.error(gettext(privilegesErrorHandler(response)));
                     });
                 };
             }
@@ -717,12 +730,12 @@
         .config(['superdeskProvider', 'assetProvider', function(superdesk, asset) {
             superdesk
                 .activity('/users/', {
-                    label: gettext('Users'),
+                    label: gettext('User management'),
                     description: gettext('Find your colleagues'),
-                    priority: 100,
                     controller: UserListController,
                     templateUrl: asset.templateUrl('superdesk-users/views/list.html'),
                     category: superdesk.MENU_MAIN,
+                    adminTools: true,
                     reloadOnSearch: false,
                     filters: [
                         {
@@ -874,9 +887,9 @@
         }])
 
         .directive('sdUserEdit', ['api', 'gettext', 'notify', 'usersService', 'userList', 'session',
-            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager', 'lodash',
+            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager',
         function(api, gettext, notify, usersService, userList, session, $location, $route, superdesk, features,
-                 asset, privileges, desks, keyboardManager, _) {
+                 asset, privileges, desks, keyboardManager) {
 
             return {
                 templateUrl: asset.templateUrl('superdesk-users/views/edit-form.html'),
@@ -891,6 +904,8 @@
                     scope.features = features;
                     scope.usernamePattern = usersService.usernamePattern;
                     scope.phonePattern = usersService.phonePattern;
+                    scope.signOffPattern = usersService.signOffPattern;
+
                     scope.dirty = false;
                     scope.errorMessage = null;
 
@@ -899,7 +914,11 @@
                     scope.$watchCollection('user', function(user) {
                         _.each(user, function(value, key) {
                             if (value === '') {
-                                delete user[key];
+                                if (key !== 'phone' || key !== 'byline') {
+                                    user[key] = null;
+                                } else {
+                                    delete user[key];
+                                }
                             }
                         });
                         scope.dirty = !angular.equals(user, scope.origUser);
@@ -999,7 +1018,6 @@
                         scope._active = usersService.isActive(user);
                         scope._pending = usersService.isPending(user);
                         scope.profile = scope.user._id === session.identity._id;
-
                         scope.userDesks = [];
                         if (angular.isDefined(user) && angular.isDefined(user._links)) {
                             desks.fetchUserDesks(user).then(function(response) {
@@ -1014,46 +1032,264 @@
                 }
             };
         }])
-        .directive('sdUserPreferences', ['api', 'session', 'preferencesService', 'notify', 'asset',
-            function(api, session, preferencesService, notify, asset) {
+
+        /**
+         * @memberof superdesk.users
+         * @ngdoc directive
+         * @name sdUserPreferences
+         * @description
+         *   This directive creates the Preferences tab on the user profile
+         *   panel, allowing users to set various system preferences for
+         *   themselves.
+         */
+        .directive('sdUserPreferences', [
+            'api', 'session', 'preferencesService', 'notify', 'asset',
+            'metadata', 'modal', '$timeout', '$q',
+        function (
+            api, session, preferencesService, notify, asset, metadata, modal,
+            $timeout, $q
+        ) {
             return {
                 templateUrl: asset.templateUrl('superdesk-users/views/user-preferences.html'),
-                link: function(scope, elem, attrs) {
+                link: function(scope, element, attrs) {
+                    var orig;  // original preferences, before any changes
 
-                    var orig;
                     preferencesService.get().then(function(result) {
                         orig = result;
                         buildPreferences(orig);
+
+                        scope.datelineSource = session.identity.dateline_source;
+                        scope.datelinePreview = scope.preferences['dateline:located'].located;
                     });
 
                     scope.cancel = function() {
                         scope.userPrefs.$setPristine();
                         buildPreferences(orig);
+
+                        scope.datelinePreview = scope.preferences['dateline:located'].located;
                     };
 
-                    scope.save = function() {
-
-                        var update = patch();
-
-                        preferencesService.update(update).then(function() {
-                                scope.cancel();
-                            }, function(response) {
-                                notify.error(gettext('User preferences could not be saved...'));
-                            });
+                    /**
+                    * Saves the preferences changes on the server. It also
+                    * invokes additional checks beforehand, namely the
+                    * preferred categories selection.
+                    *
+                    * @method save
+                    */
+                    scope.save = function () {
+                        preSaveCategoriesCheck()
+                        .then(function () {
+                            var update = createPatchObject();
+                            return preferencesService.update(update);
+                        }, function () {
+                            return $q.reject('canceledByModal');
+                        })
+                        .then(function () {
+                            notify.success(gettext('User preferences saved'));
+                            scope.cancel();
+                        }, function (reason) {
+                            if (reason !== 'canceledByModal') {
+                                notify.error(gettext(
+                                    'User preferences could not be saved...'
+                                ));
+                            }
+                        });
                     };
 
-                    function buildPreferences(struct) {
+                    /**
+                     * Invoked by the directive after updating the property in item. This method is responsible for updating
+                     * the properties dependent on dateline.
+                     */
+                    scope.changeDatelinePreview = function(datelinePreference, city) {
+                        if (city === '') {
+                            datelinePreference.located = null;
+                        }
+
+                        $timeout(function () {
+                            scope.datelinePreview = datelinePreference.located;
+                        });
+                    };
+
+                    /**
+                    * Marks all categories in the preferred categories list
+                    * as selected.
+                    *
+                    * @method checkAll
+                    */
+                    scope.checkAll = function () {
+                        scope.categories.forEach(function (cat) {
+                            cat.selected = true;
+                        });
+                        scope.userPrefs.$setDirty();
+                    };
+
+                    /**
+                    * Marks all categories in the preferred categories list
+                    * as *not* selected.
+                    *
+                    * @method checkNone
+                    */
+                    scope.checkNone = function () {
+                        scope.categories.forEach(function (cat) {
+                            cat.selected = false;
+                        });
+                        scope.userPrefs.$setDirty();
+                    };
+
+                    /**
+                    * Marks the categories in the preferred categories list
+                    * that are considered default as selected, and all the
+                    * other categories as *not* selected.
+                    *
+                    * @method checkDefault
+                    */
+                    scope.checkDefault = function () {
+                        scope.categories.forEach(function (cat) {
+                            cat.selected = !!scope.defaultCategories[cat.qcode];
+                        });
+                        scope.userPrefs.$setDirty();
+                    };
+
+                    /**
+                    * Builds a user preferences object in scope from the given
+                    * data.
+                    *
+                    * @function buildPreferences
+                    * @param {Object} data - user preferences data, arranged in
+                    *   logical groups. The keys represent these groups' names,
+                    *   while the corresponding values are objects containing
+                    *   user preferences settings for a particular group.
+                    */
+                    function buildPreferences(data) {
+                        var buckets,  // names of the needed metadata buckets
+                            initNeeded;  // metadata service init needed?
+
                         scope.preferences = {};
-                        _.each(struct, function(val, key) {
+                        _.each(data, function(val, key) {
                             if (val.label && val.category) {
                                 scope.preferences[key] = _.create(val);
                             }
                         });
+
+                        // metadata service initialization is needed if its
+                        // values object is undefined or any of the needed
+                        // data buckets are missing in it
+                        buckets = [
+                            'cities', 'categories', 'default_categories'
+                        ];
+                        initNeeded = buckets.some(function (bucketName) {
+                            var values = metadata.values || {};
+                            return angular.isUndefined(values[bucketName]);
+                        });
+
+                        if (initNeeded) {
+                            metadata.initialize().then(function () {
+                                updateScopeData(metadata.values, data);
+                            });
+                        } else {
+                            updateScopeData(metadata.values, data);
+                        }
                     }
 
-                    function patch() {
+                    /**
+                    * Updates auxiliary scope data, such as the lists of
+                    * available and content categories to choose from.
+                    *
+                    * @function updateScopeData
+                    * @param {Object} helperData - auxiliary data used by the
+                    *   preferences settings UI
+                    * @param {Object} userPrefs - user's personal preferences
+                    *   settings
+                    */
+                    function updateScopeData(helperData, userPrefs) {
+                        scope.cities = helperData.cities;
+
+                        // A list of category codes that are considered
+                        // preferred by default, unless of course the user
+                        // changes this preference setting.
+                        scope.defaultCategories = {};
+                        helperData.default_categories.forEach(function (cat) {
+                            scope.defaultCategories[cat.qcode] = true;
+                        });
+
+                        // Create a list of categories for the UI widgets to
+                        // work on. New category objects are created so that
+                        // objects in the existing category list are protected
+                        // from modifications on ng-model changes.
+                        scope.categories = [];
+                        helperData.categories.forEach(function (cat) {
+                            var newObj = _.create(cat),
+                                selectedCats = userPrefs['categories:preferred'].selected;
+                            newObj.selected = !!selectedCats[cat.qcode];
+                            scope.categories.push(newObj);
+                        });
+                    }
+
+                    /**
+                    * Checks if at least one preferred category has been
+                    * selected, and if not, asks the user whether or not to
+                    * proceed with a default set of categories selected.
+                    *
+                    * Returns a promise that is resolved if saving the
+                    * preferences should continue, and rejected if it should be
+                    * aborted (e.g. when no categories are selected AND the
+                    * user does not confirm using a default set of categories).
+                    *
+                    * @function preSaveCategoriesCheck
+                    * @return {Object} - a promise object
+                    */
+                    function preSaveCategoriesCheck() {
+                        var modalResult,
+                            msg,
+                            someSelected;
+
+                        someSelected = scope.categories.some(function (cat) {
+                            return cat.selected;
+                        });
+
+                        if (someSelected) {
+                            // all good, simply return a promise that resolves
+                            return $q.when();
+                        }
+
+                        msg = [
+                            'No preferred categories selected. Should you ',
+                            'choose to proceed with your choice, a default ',
+                            'set of categories will be selected for you.'
+                        ].join('');
+                        msg = gettext(msg);
+
+                        modalResult = modal.confirm(msg).then(function () {
+                            scope.checkDefault();
+                        });
+
+                        return modalResult;
+                    }
+
+                    /**
+                    * Creates and returns a user preferences object that can
+                    * be used as a parameter in a PATCH request to the server
+                    * when user preferences are saved.
+                    *
+                    * @function createPatchObject
+                    * @return {Object}
+                    */
+                    function createPatchObject() {
                         var p = {};
+
                         _.each(orig, function(val, key) {
+                            if (key === 'dateline:located') {
+                                var $input = element.find('.input-term > input');
+                                scope.changeDatelinePreview(scope.preferences[key], $input[0].value);
+                            }
+
+                            if (key === 'categories:preferred') {
+                                val.selected = {};
+                                scope.categories.forEach(function (cat) {
+                                    val.selected[cat.qcode] = !!cat.selected;
+                                });
+                            }
+
                             p[key] = _.extend(val, scope.preferences[key]);
                         });
                         return p;
@@ -1061,6 +1297,16 @@
                 }
             };
         }])
+
+        /**
+         * @memberof superdesk.users
+         * @ngdoc directive
+         * @name sdUserPrivileges
+         * @description
+         *   This directive creates the Privileges tab on the user profile
+         *   panel, used for setting user permissions for various actions in
+         *   the system.
+         */
         .directive('sdUserPrivileges', ['api', 'gettext', 'notify', function(api, gettext, notify) {
             return {
                 scope: {
@@ -1079,15 +1325,44 @@
                         console.log(error);
                     });
 
-                    scope.save = function(userPrivileges) {
-                        api.save('users', scope.user, _.pick(scope.user, 'privileges'))
-                        .then(function(result) {
+                    // the last user privileges that were saved on the server
+                    scope.origPrivileges = angular.copy(scope.user.privileges);
+
+                    /**
+                    * Saves selected user privileges on the server and marks
+                    * the corresponding HTML form as $pristine.
+                    *
+                    * @method save
+                    */
+                    scope.save = function () {
+                        api.save(
+                            'users',
+                            scope.user,
+                            _.pick(scope.user, 'privileges')
+                        )
+                        .then(function () {
+                            scope.origPrivileges = angular.copy(
+                                scope.user.privileges);
+                            scope.userPrivileges.$setPristine();
                             notify.success(gettext('Privileges updated.'));
-                        }, function(error) {
-                            notify.error(gettext('Privileges not updated.'));
-                            console.log(error);
+                        }, function (response) {
+                            notify.error(
+                                gettext(privilegesErrorHandler(response)));
                         });
-                        userPrivileges.$setPristine();
+                    };
+
+                    /**
+                    * Reverts all changes to user privileges settings since the
+                    * time they were last saved, and marks the corresponding
+                    * HTML form as $pristine.
+                    *
+                    * @method cancel
+                    */
+                    scope.cancel = function () {
+                        scope.user.privileges = angular.copy(
+                            scope.origPrivileges);
+
+                        scope.userPrivileges.$setPristine();
                     };
                 }
             };
@@ -1283,9 +1558,36 @@
                 templateUrl: asset.templateUrl('superdesk-users/views/mentions.html'),
                 link: function(scope, elem) {
                     scope.users = [];
+                    scope.fetching = false;
+                    scope.prefix = '';
+
+                    var container = elem.children()[0];
+                    elem.children().bind('scroll', function() {
+                        if (container.scrollTop + container.offsetHeight >= container.scrollHeight - 3) {
+                            container.scrollTop = container.scrollTop - 3;
+                            scope.fetchNext();
+                        }
+                    });
+
+                    scope.fetchNext = function() {
+                        if (!scope.fetching) {
+                            var page = scope.users.length / 10 + 1;
+                            scope.fetching = true;
+
+                            userList.get(scope.prefix, page, 10)
+                            .then(function(result) {
+                                _.each(_.sortBy(result._items.slice((page - 1) * 10, page * 10), 'username'), function(item) {
+                                    scope.users.push(item);
+                                });
+
+                                scope.fetching = false;
+                            });
+                        }
+                    };
 
                     // filter user by given prefix
                     scope.searchUsers = function(prefix) {
+                        scope.prefix = prefix;
 
                         return userList.get(prefix, 1, 10)
                         .then(function(result) {

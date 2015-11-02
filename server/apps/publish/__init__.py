@@ -12,10 +12,8 @@
 import logging
 
 import superdesk
-from apps.publish.archive_publish import ArchivePublishResource, ArchivePublishService, \
+from apps.publish.content import ArchivePublishResource, ArchivePublishService, \
     KillPublishResource, KillPublishService, CorrectPublishResource, CorrectPublishService
-from apps.publish.subscribers import SubscribersResource, SubscribersService
-from apps.publish.publish_queue import PublishQueueResource, PublishQueueService
 from apps.publish.published_item import PublishedItemResource, PublishedItemService
 from apps.publish.commands import RemoveExpiredPublishContent  # noqa
 from superdesk.celery_app import celery
@@ -38,20 +36,14 @@ def init_app(app):
     service = CorrectPublishService(endpoint_name, backend=get_backend())
     CorrectPublishResource(endpoint_name, app=app, service=service)
 
-    endpoint_name = 'subscribers'
-    service = SubscribersService(endpoint_name, backend=get_backend())
-    SubscribersResource(endpoint_name, app=app, service=service)
-
-    endpoint_name = 'publish_queue'
-    service = PublishQueueService(endpoint_name, backend=get_backend())
-    PublishQueueResource(endpoint_name, app=app, service=service)
-
     endpoint_name = 'published'
     service = PublishedItemService(endpoint_name, backend=get_backend())
     PublishedItemResource(endpoint_name, app=app, service=service)
 
     superdesk.privilege(name='subscribers', label='Subscribers', description='User can manage subscribers')
     superdesk.privilege(name='publish', label='Publish', description='Publish a content')
+    superdesk.privilege(name='kill', label='Kill', description='Kill a published content')
+    superdesk.privilege(name='correct', label='Correction', description='Correction to a published content')
     superdesk.privilege(name='publish_queue', label='Publish Queue', description='User can update publish queue')
 
 

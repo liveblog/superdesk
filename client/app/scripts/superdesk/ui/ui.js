@@ -23,6 +23,7 @@ define([
                 $scope.isOpen = attrs.open === 'true';
                 $scope.icon = attrs.icon;
                 $scope.mode = attrs.mode;
+                $scope.style = attrs.style;
                 $scope.toggleModule = function() {
                     $scope.isOpen = !$scope.isOpen;
                 };
@@ -126,15 +127,18 @@ define([
                 $scope.selectedStep = null;
                 $scope.steps = [];
 
+                var stopWatch;
                 this.addStep = function(step) {
                     $scope.steps.push(step);
-                };
 
-                $scope.$watch('currentStep', function(stepCode) {
-                    if (stepCode && (($scope.selectedStep && $scope.selectedStep.code !== stepCode) || !$scope.selectedStep)) {
-                        $scope.goTo(_.findWhere($scope.steps, {code: stepCode}));
+                    if (!stopWatch) {
+                        stopWatch = $scope.$watch('currentStep', function(stepCode) {
+                            if (stepCode && (($scope.selectedStep && $scope.selectedStep.code !== stepCode) || !$scope.selectedStep)) {
+                                $scope.goTo(_.findWhere($scope.steps, {code: stepCode}));
+                            }
+                        });
                     }
-                });
+                };
 
                 function unselectAll() {
                     _.each($scope.steps, function (step) {
@@ -214,7 +218,7 @@ define([
     function AutofocusDirective() {
         return {
             link: function(scope, element) {
-                _.defer(function() {
+                _.defer (function() {
                     element.focus();
                 });
             }
@@ -259,9 +263,10 @@ define([
         return {
             link: function(scope, element) {
 
-                var tolerance = 250;
-                var isRightOriented = null;
-                var menu = null;
+                var tolerance = 300,
+                    isRightOriented = null,
+                    isInlineOriented = null,
+                    menu = null;
 
                 element.bind('click', function(event) {
 
@@ -281,12 +286,33 @@ define([
                         } else {
                             menu.addClass('pull-right');
                         }
+
+                        if (closeToRight(event)) {
+                            menu.addClass('pull-right');
+                        } else {
+                            menu.removeClass('pull-right');
+                        }
+                    }
+
+                    if (isInlineOriented) {
+                        if (closeToLeft(event)) {
+                            element.removeClass('dropleft').addClass('dropright');
+                        } else {
+                            element.addClass('dropleft').removeClass('dropright');
+                        }
+
+                        if (closeToRight(event)) {
+                            element.removeClass('dropright').addClass('dropleft');
+                        } else {
+                            element.addClass('dropright').removeClass('dropleft');
+                        }
                     }
                 });
 
                 function checkOrientation() {
                     menu = element.children('.dropdown-menu');
                     isRightOriented = menu.hasClass('pull-right');
+                    isInlineOriented = element.hasClass('dropright') || element.hasClass('dropleft');
                 }
 
                 function closeToBottom(e) {
@@ -297,6 +323,76 @@ define([
                 function closeToLeft(e) {
                     return e.pageX < tolerance;
                 }
+
+                function closeToRight(e) {
+                    var docWidth = $document.width();
+                    return (docWidth - e.pageX) < tolerance;
+                }
+            }
+        };
+    }
+
+    DropdownPositionRightDirective.$inject = ['$position'];
+    /**
+     * Correct dropdown menu position to be right aligned
+     * with dots-vertical icon.
+     */
+    function DropdownPositionRightDirective($position) {
+        return {
+            require: 'dropdown',
+            link: function(scope, elem, attrs, dropdown) {
+                var icon = elem.find('.icon-dots-vertical');
+                // ported from bootstrap 0.13.1
+                scope.$watch(dropdown.isOpen, function(isOpen) {
+                    if (isOpen) {
+                        var pos = $position.positionElements(
+                            icon,
+                            dropdown.dropdownMenu,
+                            'bottom-right',
+                            true
+                        );
+
+                        var css = {
+                            top: pos.top + 'px',
+                            display: isOpen ? 'block' : 'none',
+                            opacity: '1'
+                        };
+
+                        css.left = 'auto';
+                        css.right = Math.max(5, window.innerWidth - pos.left);
+
+                        dropdown.dropdownMenu.css({opacity: '0'}); // avoid flickering
+
+                        scope.$applyAsync(function () {
+                            dropdown.dropdownMenu.css(css);
+
+                            /*
+                             * Calculate if there is enough space for showing after the icon
+                             * if not, show it above the icon
+                             */
+                            var windowHeight = window.innerHeight - 30, //Subracting 30 is for submenu bar
+                                dropdownHeight = dropdown.dropdownMenu.outerHeight();
+
+                            if ((windowHeight - pos.top) < dropdownHeight) {
+                                if ((pos.top - 110) < dropdownHeight) { //Substracting 110 is for topmenu and submenu bar
+                                    css = {
+                                        top: '110px',
+                                        right: css.right + 30
+                                        // Addition 30 so the drodpown would not overlap icon
+                                    };
+                                } else {
+                                    css.top = pos.top - dropdownHeight - icon.outerHeight() - 15;
+                                    //Subtracting 15 so the dropdown is not stick to the icon
+                                }
+
+                                dropdown.dropdownMenu.css({
+                                    top: css.top,
+                                    right: css.right
+                                });
+                            }
+                        });
+                    }
+                });
             }
         };
     }
@@ -727,59 +823,160 @@ define([
         };
     }
 
-    function TimepickerAltDirective() {
+    /**
+     * @memberof superdesk.ui
+     * @ngdoc directive
+     * @name sdTimepickerAlt
+     * @description
+     *   Timepicker directive saving utc time to model by defualt, and
+     *   rendering local time.
+     *
+     *   Optionally, saving the UTC time to the model can be disabled by
+     *   setting the no-utc-convert="true" attribute on the directive's DOM
+     *   element. If this option is set, local time will be stored in the model
+     *   (i.e. as picked by the user in the UI).
+     *
+     *   NOTE: the no-utc-convert attribute is only evaluated once, in the
+     *   directive linking phase. Subsequent changes of the attribute value
+     *   have no effect.
+     */
+    TimepickerAltDirective.$inject = ['tzdata'];
+    function TimepickerAltDirective(tzdata) {
         var STEP = 5;
 
-        var convertIn = function(time) {
-            return {
-                hours: parseInt(time.substr(0, 2), 10),
-                minutes: parseInt(time.substr(2, 2), 10)
-            };
-        };
-
-        var convertOut = function(hours, minutes) {
-            var h = hours.toString();
-            var m = minutes.toString();
-            if (h.length === 1) {
-                h = '0' + h;
-            }
-            if (m.length === 1) {
-                m = '0' + m;
-            }
-            return h + m;
-        };
-
-        var range = function(min, max, step) {
+        function range(min, max, step) {
             step = step || 1;
-            var range = [];
+            var items = [];
             for (var i = min; i <= max; i = i + step) {
-                range.push(i);
+                items.push(i);
             }
-            return range;
-        };
+            return items;
+        }
 
         return {
             scope: {
-                model: '='
+                model: '=',
+                noUtcConvert: '@'
             },
             templateUrl: 'scripts/superdesk/ui/views/sd-timepicker-alt.html',
             link: function(scope) {
+
+                var d = new Date(),
+                    hours,
+                    minutes,
+                    utcConvert;
+
+                utcConvert = (scope.noUtcConvert || '').toLowerCase() !== 'true';
+
                 scope.open = false;
-                scope.hours = 0;
-                scope.minutes = 0;
                 scope.hoursRange = range(0, 23);
                 scope.minutesRange = range(0, 59, STEP);
 
-                scope.$watch('model', function() {
-                    var result = convertIn(scope.model);
-                    scope.hours = result.hours;
-                    scope.minutes = result.minutes;
+                tzdata.$promise.then(function () {
+                    scope.timeZones = tzdata.getTzNames();
                 });
 
-                scope.submit = function() {
-                    scope.model = convertOut(scope.hours, scope.minutes);
-                    scope.open = false;
+                if (scope.model) {
+                    hours = scope.model.substr(0, 2);
+                    minutes = scope.model.substr(2, 2);
+
+                    if (utcConvert) {
+                        d.setUTCHours(hours);
+                        d.setUTCMinutes(minutes);
+                    } else {
+                        d.setHours(hours);
+                        d.setMinutes(minutes);
+                    }
+                } else {
+                    d.setHours(0);
+                    d.setMinutes(0);
+                }
+
+                // whether or not the model actually has a value
+                scope.hasValue = !!scope.model;
+
+                /**
+                 * Set local hours
+                 *
+                 * @param {int} hours
+                 */
+                scope.setHours = function(hours) {
+                    d.setHours(hours);
+                    scope.hasValue = true;
+                    update();
                 };
+
+                /**
+                 * Set local minutes
+                 *
+                 * @param {int} minutes
+                 */
+                scope.setMinutes = function(minutes) {
+                    d.setMinutes(minutes);
+                    scope.hasValue = true;
+                    update();
+                };
+
+                /**
+                 * Toggle time picker on/off
+                 */
+                scope.toggle = function() {
+                    scope.open = !scope.open;
+                };
+
+                /**
+                 * Clears the model value (marking it as "no value selected").
+                 *
+                 * @method clearValue
+                 */
+                scope.clearValue = function () {
+                    d.setHours(0);
+                    d.setMinutes(0);
+                    scope.hasValue = false;
+                    update();
+                };
+
+                update();
+
+                /**
+                 * Update scope using local time and model using utc time
+                 */
+                function update() {
+                    if (scope.hasValue) {
+                        scope.hours = d.getHours();
+                        scope.minutes = d.getMinutes();
+                        scope.model = utcConvert ? utc() : noUtcTime(d);
+                    } else {
+                        scope.hours = 0;
+                        scope.minutes = 0;
+                        scope.model = '';
+                    }
+                }
+
+                /**
+                 * Get utc time for model
+                 *
+                 * @return {string} utc time in format `HHMM`
+                 */
+                function utc() {
+                    var hours = d.getUTCHours().toString();
+                    var minutes = d.getUTCMinutes().toString();
+                    return ('00' + hours).slice(-2) + ('00' + minutes).slice(-2);
+                }
+
+                /**
+                 * Returns the '%H%M' time string (i.e. double-digit hour and
+                 * minute parts) from the given Date object using local time.
+                 *
+                 * @function noUtcTime
+                 * @param {Date} d
+                 * @return {string}
+                 */
+                function noUtcTime(d) {
+                    var hours = ('00' + d.getHours()).slice(-2),
+                        minutes = ('00' + d.getMinutes()).slice(-2);
+                    return hours + minutes;
+                }
             }
         };
     }
@@ -838,7 +1035,44 @@ define([
         };
     }
 
-    return angular.module('superdesk.ui', [])
+    WeekdayPickerDirective.$inject = ['weekdays'];
+    function WeekdayPickerDirective(weekdays) {
+        return {
+            templateUrl: 'scripts/superdesk/ui/views/weekday-picker.html',
+            scope: {model: '='},
+            link: function(scope) {
+                scope.weekdays = weekdays;
+                scope.weekdayList = Object.keys(weekdays);
+
+                scope.model = scope.model || [];
+
+                /**
+                 * Test if given day is selected for schedule
+                 *
+                 * @param {string} day
+                 * @return {boolean}
+                 */
+                scope.isDayChecked = function(day) {
+                    return scope.model.indexOf(day) !== -1;
+                };
+
+                /**
+                 * Toggle given day on/off
+                 *
+                 * @param {string} day
+                 */
+                scope.toggleDay = function(day) {
+                    if (scope.isDayChecked(day)) {
+                        scope.model.splice(scope.model.indexOf(day), 1);
+                    } else {
+                        scope.model.push(day);
+                    }
+                };
+            }
+        };
+    }
+
+    return angular.module('superdesk.ui', ['superdesk.dashboard.world-clock'])
 
         .directive('sdShadow', ShadowDirective)
         .directive('sdAutoHeight', require('./autoheight-directive'))
@@ -860,5 +1094,8 @@ define([
         .service('popupService', PopupService)
         .service('datetimeHelper', DateTimeHelperService)
         .filter('leadingZero', LeadingZeroFilter)
-        .directive('sdDropdownPosition', DropdownPositionDirective);
+        .directive('sdDropdownPosition', DropdownPositionDirective)
+        .directive('sdDropdownPositionRight', DropdownPositionRightDirective)
+        .directive('sdWeekdayPicker', WeekdayPickerDirective)
+        ;
 });

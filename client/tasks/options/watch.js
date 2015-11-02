@@ -11,14 +11,22 @@ module.exports = {
     },
     code: {
         options: {livereload: true},
-        tasks: ['hint'],
+        tasks: [],
         files: [
             '<%= appDir %>/scripts/*.js',
             '<%= appDir %>/scripts/superdesk*/**/*.js'
         ]
     },
+    ngtemplates: {
+        options: {livereload: true},
+        tasks: [],
+        files: [
+            '<%= appDir %>/scripts/superdesk*/views/*.html'
+        ]
+    },
     assets: {
         options: {livereload: true},
+        tasks: [],
         files: [
             '<%= appDir %>/styles/**/*.css',
             '<%= appDir %>/scripts/superdesk*/**/*.html',

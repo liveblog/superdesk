@@ -64,17 +64,22 @@ define([
     angular.module('superdesk.session', [])
         .service('session', require('./session-service'));
 
-    return angular.module('superdesk.auth', ['superdesk.features', 'superdesk.activity', 'superdesk.session'])
+    return angular.module('superdesk.auth', [
+        'superdesk.features',
+        'superdesk.activity',
+        'superdesk.session',
+        'superdesk.asset'
+        ])
         .service('auth', require('./auth-service'))
         .service('authAdapter', require('./basic-auth-adapter'))
         .directive('sdLoginModal', require('./login-modal-directive'))
-        .config(['$httpProvider', 'superdeskProvider', function($httpProvider, superdesk) {
+        .config(['$httpProvider', 'superdeskProvider', 'assetProvider', function($httpProvider, superdesk, asset) {
             $httpProvider.interceptors.push(AuthInterceptor);
 
             superdesk
                 .activity('/reset-password/', {
                     controller: ResetPassworController,
-                    templateUrl: require.toUrl('./reset-password.html'),
+                    templateUrl: asset.templateUrl('superdesk/auth/reset-password.html'),
                     auth: false
                 });
         }])
@@ -96,7 +101,6 @@ define([
         // watch session token, identity
         .run(['$rootScope', '$route', '$location', '$http', '$window', 'session', 'api',
         function($rootScope, $route, $location, $http, $window, session, api) {
-
             $rootScope.logout = function() {
 
                 function replace() {
@@ -128,27 +132,5 @@ define([
                     $rootScope.sessionId = null;
                 }
             });
-
-            // prevent routing when there is no token
-            $rootScope.$on('$locationChangeStart', function (e) {
-                $rootScope.requiredLogin = requiresLogin($location.path());
-                if (!session.token && $rootScope.requiredLogin) {
-                    session.getIdentity().then(function() {
-                        $http.defaults.headers.common.Authorization = session.token;
-                    });
-                    e.preventDefault();
-                }
-            });
-
-            function requiresLogin(url) {
-                var routes = _.values($route.routes);
-                for (var i = routes.length - 1; i >= 0; i--) {
-                    if (routes[i].regexp.test(url)) {
-                        return routes[i].auth;
-                    }
-                }
-                return false;
-            }
-
         }]);
 });

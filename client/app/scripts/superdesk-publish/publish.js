@@ -11,7 +11,7 @@
 (function() {
     'use strict';
 
-    var app = angular.module('superdesk.publish', ['superdesk.users', 'superdesk.publish.filters']);
+    var app = angular.module('superdesk.publish', ['superdesk.users', 'superdesk.content_filters']);
 
     app.value('transmissionTypes', {
         ftp: {
@@ -33,9 +33,9 @@
         pull: {
             label: 'Pull'
         },
-        PublicArchive: {
-            label: 'Public Archive',
-            templateUrl: 'scripts/superdesk-publish/views/public-archive-config.html'
+        http_push: {
+            label: 'HTTP Push',
+            templateUrl: 'scripts/superdesk-publish/views/http-push-config.html'
         }
     });
 
@@ -132,7 +132,13 @@
         $scope.selectedQueueItems = [];
         $scope.showResendBtn = false;
         $scope.showCancelBtn = false;
+        $scope.queueSearch = false;
         $scope.selected = {};
+        $scope.publish_queue_statuses = ['pending', 'in-progress', 'success', 'error'];
+        $scope.pageSize = 25;
+        $scope.page = 1;
+
+        $scope.$watch('page', $scope.reload);
 
         var promises = [];
 
@@ -143,13 +149,68 @@
             });
         }));
 
+        /*
+        * Get search input from search box to search for headline or unique_name,
+        * and perfrom reload function to populate publish queue.
+        */
+        $scope.search = function(query) {
+            $scope.searchQuery = query;
+            $scope.page = 1;
+            $scope.reload();
+        };
+
+        /*
+        * Populates the publish queue and update the flags after fetch operation.
+        */
+        function populatePublishQueue () {
+            fetchPublishQueue().then(function(queue) {
+                var queuedItems = queue._items;
+
+                _.forEach(queuedItems, function(item) {
+                    angular.extend(item, {'selected': false});
+                });
+
+                $scope.publish_queue = queuedItems;
+                $scope.lastRefreshedAt = new Date();
+                $scope.showResendBtn = false;
+                $scope.showCancelBtn = false;
+                $scope.maxPage =  Math.ceil(queue._meta.total / $scope.pageSize);
+            });
+        }
+        /*
+        * Fetch the publish queue on the basis of built criteria.
+        */
         function fetchPublishQueue () {
             var criteria = criteria || {};
-            criteria.max_results = 200;
-            criteria.sort = '[(\'published_seq_num\',-1)]';
+            criteria.max_results = $scope.pageSize;
+            criteria.page = $scope.page;
 
-            if ($scope.selectedFilterSubscriber !== null) {
-                criteria.where = {'subscriber_id': $scope.selectedFilterSubscriber._id};
+            var orTerms = null;
+            if (!_.isEmpty($scope.searchQuery)) {
+                orTerms = {'$or': [{'headline': $scope.searchQuery}, {'unique_name': $scope.searchQuery}]};
+            }
+
+            var filterTerms = [];
+            if ($scope.selectedFilterSubscriber != null) {
+                filterTerms.push({'subscriber_id': $scope.selectedFilterSubscriber._id});
+            }
+            if ($scope.selectedFilterStatus != null) {
+                filterTerms.push({'state': $scope.selectedFilterStatus});
+            }
+
+            var andTerms = [];
+            _.each(filterTerms, function(term) {
+                andTerms.push(term);
+            });
+
+            if (orTerms !== null) {
+                andTerms.push(orTerms);
+            }
+
+            if (!_.isEmpty(andTerms)) {
+                criteria.where = JSON.stringify ({
+                    '$and': andTerms
+                });
             }
 
             return api.publish_queue.query(criteria);
@@ -157,20 +218,8 @@
 
         $scope.reload = function() {
             $q.all(promises).then(function() {
-                fetchPublishQueue().then(function(queue) {
-                    var queuedItems = queue._items;
-
-                    _.forEach(queuedItems, function(item) {
-                        angular.extend(item, {'selected': false});
-                    });
-
-                    $scope.publish_queue = queuedItems;
-                    $scope.lastRefreshedAt = new Date();
-                    $scope.showResendBtn = false;
-                    $scope.showCacnelBtn = false;
-
-                    previewItem();
-                });
+                populatePublishQueue();
+                previewItem();
             });
         };
 
@@ -196,7 +245,7 @@
             api.publish_queue.save([], queueItems).then(
                 function(response) {
                     $scope.reload();
-                    $scope.cancelSelection();
+                    $scope.cancelSelection(false);
                 },
                 function(response) {
                     if (angular.isDefined(response.data._issues)) {
@@ -214,21 +263,19 @@
             if (type === 'subscriber') {
                 $scope.selectedFilterSubscriber = item;
             }
-
+            populatePublishQueue();
             $scope.multiSelectCount = 0;
-            fetchPublishQueue().then(function(queue) {
-                var queuedItems = queue._items;
-
-                _.forEach(queuedItems, function(item) {
-                    angular.extend(item, {'selected': false});
-                });
-
-                $scope.publish_queue = queuedItems;
-                $scope.lastRefreshedAt = new Date();
-                $scope.showResendBtn = false;
-                $scope.showCancelBtn = false;
-                $scope.selectedQueueItems = [];
-            });
+            $scope.selectedQueueItems = [];
+            $scope.page = 1;
+        };
+        $scope.filterStatus = function(item, type) {
+            if (type === 'status') {
+                $scope.selectedFilterStatus = item;
+            }
+            populatePublishQueue();
+            $scope.multiSelectCount = 0;
+            $scope.selectedQueueItems = [];
+            $scope.page = 1;
         };
 
         $scope.selectQueuedItem = function(queuedItem) {
@@ -263,8 +310,11 @@
             $scope.multiSelectCount = $scope.selectedQueueItems.length;
         };
 
-        $scope.cancelSelection = function() {
-            $scope.selectedFilterSubscriber = null;
+        $scope.cancelSelection = function(resetSubscribersFilter) {
+            if (angular.isUndefined(resetSubscribersFilter) || _.isNull(resetSubscribersFilter) || resetSubscribersFilter) {
+                $scope.selectedFilterSubscriber = null;
+            }
+
             $scope.selectedQueueItems = [];
             $scope.multiSelectCount = 0;
             $scope.filterSchedule();
@@ -302,8 +352,14 @@
         $scope.reload();
     }
 
-    SubscribersDirective.$inject = ['gettext', 'notify', 'api', 'adminPublishSettingsService', 'modal', 'metadata', 'filters', '$q'];
-    function SubscribersDirective(gettext, notify, api, adminPublishSettingsService, modal, metadata, filters, $q) {
+    SubscribersDirective.$inject = [
+        'gettext', 'notify', 'api', 'adminPublishSettingsService', 'modal',
+        'metadata', 'contentFilters', '$q', '$filter'
+    ];
+    function SubscribersDirective(
+        gettext, notify, api, adminPublishSettingsService,
+        modal, metadata, contentFilters, $q, $filter) {
+
         return {
             templateUrl: 'scripts/superdesk-publish/views/subscribers.html',
             link: function ($scope) {
@@ -311,7 +367,7 @@
                 $scope.origSubscriber = null;
                 $scope.subscribers = null;
                 $scope.newDestination = null;
-                $scope.publishFilters = null;
+                $scope.contentFilters = null;
                 $scope.geoRestrictions = null;
                 $scope.subTypes = null;
 
@@ -325,20 +381,32 @@
                     });
                 }
 
+                /**
+                 * Fetches all subscribers from backend
+                 */
                 function fetchSubscribers() {
                     adminPublishSettingsService.fetchSubscribers().then(
                         function(result) {
+                            result._items = $filter('sortByName')(result._items);
                             $scope.subscribers = result;
                         }
                     );
                 }
 
-                var fetchPublishFilters = function() {
-                    return api.query('publish_filters').then(function(filters) {
-                        $scope.publishFilters = filters._items;
+                /**
+                 * Fetches content filters from backend and returns the same.
+                 *
+                 * @return {*}
+                 */
+                var fetchContentFilters = function() {
+                    return api.query('content_filters').then(function(filters) {
+                        $scope.contentFilters = filters._items;
                     });
                 };
 
+                /**
+                 * Initializes the Global Filters on the selected subscriber.
+                 */
                 var initGlobalFilters = function() {
                     if (!$scope.subscriber) {
                         return;
@@ -355,40 +423,66 @@
                     });
                 };
 
-                var fetchGlobalPublishFilters = function() {
-                    return filters.getGlobalPublishFilters().then(function(filters) {
+                /**
+                 * Fetches list of global content filters and returns the same.
+                 *
+                 * @return {*}
+                 */
+                var fetchGlobalContentFilters = function() {
+                    return contentFilters.getGlobalContentFilters().then(function(filters) {
                         $scope.globalFilters = filters;
                     });
                 };
 
+                /**
+                 * Fetch list of publish errors from the backend allowing the user to configure for the selected subscriber.
+                 *
+                 * @return {*}
+                 */
                 function fetchPublishErrors() {
                     return adminPublishSettingsService.fetchPublishErrors().then(function(result) {
                         $scope.all_errors = result._items[0].all_errors;
                     });
                 }
 
+                /**
+                 * Initializes the new destination object.
+                 */
                 $scope.addNewDestination = function() {
                     $scope.newDestination = {};
                 };
 
+                /**
+                 * Reverts the changes made to the new destination object
+                 */
                 $scope.cancelNewDestination = function() {
                     $scope.newDestination = null;
                 };
 
+                /**
+                 * Saves the destination and adds it to the destinations list of the selected subscriber
+                 */
                 $scope.saveNewDestination = function() {
-                    $scope.subscriber.destinations.push($scope.newDestination);
+                    $scope.destinations.push($scope.newDestination);
                     $scope.newDestination = null;
                 };
 
+                /**
+                 * Removes the selected destination from the destinations list of the selected subscriber.
+                 */
                 $scope.deleteDestination = function(destination) {
-                    _.remove($scope.subscriber.destinations, destination);
+                    _.remove($scope.destinations, destination);
                 };
 
+                /**
+                 * Upserts the selected subscriber.
+                 */
                 $scope.save = function() {
-
-                    if ($scope.subscriber.publish_filter && $scope.subscriber.publish_filter.filter_id === '') {
-                        $scope.subscriber.publish_filter = null;
+                    if ($scope.subscriber.content_filter && $scope.subscriber.content_filter.filter_id === '') {
+                        $scope.subscriber.content_filter = null;
                     }
+
+                    $scope.subscriber.destinations = $scope.destinations;
 
                     api.subscribers.save($scope.origSubscriber, $scope.subscriber)
                         .then(
@@ -414,47 +508,71 @@
                         ).then(fetchSubscribers);
                 };
 
+                /**
+                 * Either initializes a new Subscriber object for adding a new subscriber or initializes the subscriber object with
+                 * the selected subscriber allowing user to update the subscriber details.
+                 */
                 $scope.edit = function(subscriber) {
                     var promises = [];
                     promises.push(fetchPublishErrors());
-                    promises.push(fetchPublishFilters());
-                    promises.push(fetchGlobalPublishFilters());
+                    promises.push(fetchContentFilters());
+                    promises.push(fetchGlobalContentFilters());
 
                     $q.all(promises).then(function() {
                         $scope.origSubscriber = subscriber || {};
                         $scope.subscriber = _.create($scope.origSubscriber);
                         $scope.subscriber.critical_errors = $scope.origSubscriber.critical_errors;
-                        $scope.subscriber.publish_filter = $scope.origSubscriber.publish_filter || {};
-                        $scope.subscriber.destinations = $scope.subscriber.destinations || [];
+                        $scope.subscriber.content_filter = $scope.origSubscriber.content_filter || {};
                         $scope.subscriber.global_filters =  $scope.origSubscriber.global_filters || {};
-                        $scope.subscriber.publish_filter.filter_type = $scope.subscriber.publish_filter.filter_type  || 'blocking';
+                        $scope.subscriber.content_filter.filter_type = $scope.subscriber.content_filter.filter_type  || 'blocking';
+
+                        $scope.destinations = [];
+                        if (angular.isDefined($scope.subscriber.destinations) && !_.isNull($scope.subscriber.destinations) &&
+                            $scope.subscriber.destinations.length > 0) {
+
+                            $scope.destinations = _.clone($scope.subscriber.destinations, true);
+                        }
+
+                        $scope.subscriberType = $scope.subscriber.subscriber_type || '';
+                        $scope.changeFormats($scope.subscriberType);
                         initGlobalFilters();
                     }, function() {
                         notify.error(gettext('Subscriber could not be initialized!'));
                     });
                 };
 
-                $scope.remove = function(subscriber) {
-                    modal.confirm(gettext('Are you sure you want to delete subscriber?'))
-                    .then(function() {
-                        return api.subscribers.remove(subscriber);
-                    })
-                    .then(function(result) {
-                        _.remove($scope.subscribers, subscriber);
-                    }, function(response) {
-                        if (angular.isDefined(response.data._message)) {
-                            notify.error(gettext('Error: ' + response.data._message));
-                        } else {
-                            notify.error(gettext('There is an error. Subscriber cannot be deleted.'));
-                        }
-                    })
-                    .then(fetchSubscribers);
-                };
-
+                /**
+                 * Reverts any changes made to the subscriber
+                 */
                 $scope.cancel = function() {
                     $scope.origSubscriber = null;
                     $scope.subscriber = null;
                     $scope.newDestination = null;
+                };
+
+                /**
+                 * Invoked when Subscriber Type is changed. Responsible for populating $scope.formats variable.
+                 * The $scope.formats variable is used to display format field in destination. The new value is changed.
+                 */
+                $scope.changeFormats = function(newSubscriberType) {
+                    var formats = _.result(_.find($scope.subTypes, {value: newSubscriberType}), 'formats');
+
+                    if ($scope.destinations.length > 0 && $scope.subscriberType !== '' &&
+                        $scope.subscriberType !== newSubscriberType) {
+
+                        var oldFormats = _.result(_.find($scope.subTypes, {value: $scope.subscriberType}), 'formats');
+                        if (!_.isEqual(oldFormats, formats)) {
+                            notify.error(gettext('Error: Please re-assign new format for each destination as the changed ' +
+                                'subscriber type has formats which are not supported by existing destination(s).'));
+
+                            _.each($scope.destinations, function(destination) {
+                                destination.format = null;
+                            });
+                        }
+                    }
+
+                    $scope.subscriberType = $scope.subscriber.subscriber_type;
+                    $scope.formats = formats;
                 };
 
                 fetchSubscribers();
@@ -483,18 +601,12 @@
                 .activity('/publish_queue', {
                     label: gettext('Publish Queue'),
                     templateUrl: 'scripts/superdesk-publish/views/publish-queue.html',
+                    topTemplateUrl: 'scripts/superdesk-dashboard/views/workspace-topnav.html',
+                    sideTemplateUrl: 'scripts/superdesk-workspace/views/workspace-sidenav.html',
                     controller: PublishQueueController,
                     category: superdesk.MENU_MAIN,
+                    adminTools: false,
                     privileges: {publish_queue: 1}
-                })
-                .activity('/settings/data_consistency', {
-                    label: gettext('Data Consistency'),
-                    templateUrl: 'scripts/superdesk-publish/views/data-consistency.html',
-                    controller: DataConsistencyController,
-                    category: superdesk.MENU_SETTINGS,
-                    privileges: {subscribers: 1},
-                    priority: 2000,
-                    beta: true
                 });
         }])
         .config(['apiProvider', function(apiProvider) {
@@ -516,28 +628,16 @@
                     rel: 'consistency'
                 }
             });
-            apiProvider.api('formatted_item', {
+            apiProvider.api('legal_publish_queue', {
                 type: 'http',
                 backend: {
-                    rel: 'formatted_item'
+                    rel: 'legal_publish_queue'
                 }
             });
             apiProvider.api('io_errors', {
                 type: 'http',
                 backend: {
                     rel: 'io_errors'
-                }
-            });
-            apiProvider.api('publish_filters', {
-                type: 'http',
-                backend: {
-                    rel: 'publish_filters'
-                }
-            });
-            apiProvider.api('publish_filter_test', {
-                type: 'http',
-                backend: {
-                    rel: 'publish_filter_test'
                 }
             });
         }]);

@@ -9,23 +9,26 @@
 # at https://www.sourcefabric.org/superdesk/license
 
 
+from copy import copy
+
 from eve.utils import ParsedRequest
 from eve.versioning import resolve_document_version
-from apps.archive.common import insert_into_versions, is_assigned_to_a_desk, get_expiry,\
-    item_operations, ITEM_OPERATION, update_version
+
+from apps.archive.common import get_expiry, item_operations, ITEM_OPERATION, update_version
+from apps.archive.common import insert_into_versions, is_assigned_to_a_desk, convert_task_attributes_to_objectId
+
 from superdesk.resource import Resource
 from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
 from superdesk.notification import push_notification
 from superdesk.utc import utcnow
-from apps.archive.common import on_create_item, item_url
+from superdesk.metadata.utils import item_url
+from apps.archive.common import on_create_item
 from superdesk.services import BaseService
-from apps.content import metadata_schema
+from superdesk.metadata.item import metadata_schema, ITEM_STATE, CONTENT_STATE, ITEM_TYPE
 import superdesk
 from superdesk.activity import add_activity, ACTIVITY_CREATE, ACTIVITY_UPDATE
 from apps.archive.archive import get_subject
 from superdesk.workflow import is_workflow_state_transition_valid
-from copy import copy
-from eve.utils import config
 from apps.archive.archive import SOURCE as ARCHIVE
 from superdesk import get_resource_service
 
@@ -62,7 +65,9 @@ def send_to(doc, update=None, desk_id=None, stage_id=None, user_id=None):
     """
 
     original_task = doc.setdefault('task', {})
-    current_stage = get_resource_service('stages').find_one(req=None, _id=original_task.get('stage'))
+    current_stage = None
+    if original_task.get('stage'):
+        current_stage = get_resource_service('stages').find_one(req=None, _id=original_task.get('stage'))
     destination_stage = calculate_expiry_from = None
     task = {'desk': desk_id, 'stage': stage_id, 'user': original_task.get('user') if user_id is None else user_id}
 
@@ -131,7 +136,7 @@ class TaskResource(Resource):
         'filter': {'task': {'$exists': True}},
         'elastic_filter': {'bool': {
             'must': {'exists': {'field': 'task'}},
-            'must_not': {'term': {'state': 'spiked'}},
+            'must_not': {'term': {ITEM_STATE: 'spiked'}},
         }}
     }
 
@@ -193,11 +198,12 @@ class TasksService(BaseService):
     def __update_state(self, updates, original):
         if self.__is_content_assigned_to_new_desk(original, updates):
             # check if the preconditions for the action are in place
-            original_state = original[config.CONTENT_STATE]
+            original_state = original[ITEM_STATE]
             if not is_workflow_state_transition_valid('move', original_state):
                 raise InvalidStateTransitionError()
 
-            updates[config.CONTENT_STATE] = 'draft' if self.__is_content_moved_from_desk(updates) else 'submitted'
+            updates[ITEM_STATE] = CONTENT_STATE.DRAFT if self.__is_content_moved_from_desk(updates) \
+                else CONTENT_STATE.SUBMITTED
             resolve_document_version(updates, ARCHIVE, 'PATCH', original)
 
     def update_stage(self, doc):
@@ -212,6 +218,7 @@ class TasksService(BaseService):
             resolve_document_version(doc, ARCHIVE, 'POST')
             self.update_times(doc)
             self.update_stage(doc)
+            convert_task_attributes_to_objectId(doc)
 
     def on_created(self, docs):
         push_notification(self.datasource, created=1)
@@ -221,7 +228,7 @@ class TasksService(BaseService):
             if is_assigned_to_a_desk(doc):
                 add_activity(ACTIVITY_CREATE, 'added new task {{ subject }} of type {{ type }}',
                              self.datasource, item=doc,
-                             subject=get_subject(doc), type=doc['type'])
+                             subject=get_subject(doc), type=doc[ITEM_TYPE])
 
     def on_update(self, updates, original):
         self.update_times(updates)
@@ -234,6 +241,7 @@ class TasksService(BaseService):
             updates[ITEM_OPERATION] = ITEM_SEND
             send_to(doc=original, update=updates, desk_id=None, stage_id=new_stage_id, user_id=new_user_id)
             resolve_document_version(updates, ARCHIVE, 'PATCH', original)
+        convert_task_attributes_to_objectId(updates)
         update_version(updates, original)
 
     def on_updated(self, updates, original):

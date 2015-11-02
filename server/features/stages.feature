@@ -14,7 +14,6 @@ Feature: Stages
         """
         {
         "name": "New",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "desk_order": 1
         }
@@ -26,7 +25,6 @@ Feature: Stages
         {
         "name": "show my content",
         "description": "Show content items created by the current logged user",
-        "task_status": "in_progress",
         "desk": "#desks._id#"
         }
         """
@@ -41,7 +39,6 @@ Feature: Stages
         {
         "name": "show my content",
         "description": "Show content items created by the current logged user",
-        "task_status": "in_progress",
         "desk": "#desks._id#",
         "desk_order": 2
         }
@@ -60,7 +57,6 @@ Feature: Stages
         """
         {
         "name": "New",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "desk_order": 1
         }
@@ -70,7 +66,6 @@ Feature: Stages
         {
         "name": "new",
         "description": "Show content items created by the current logged user",
-        "task_status": "in_progress",
         "desk": "#desks._id#"
         }
         """
@@ -80,7 +75,6 @@ Feature: Stages
         {
         "name": "newer",
         "description": "Show content items created by the current logged user",
-        "task_status": "in_progress",
         "desk": "#desks._id#"
         }
         """
@@ -112,7 +106,7 @@ Feature: Stages
         """
         {
         "_error": {"code": 400, "message": "Insertion failure: 1 document(s) contain(s) error(s)"},
-        "_issues": {"name": {"required": 1}, "task_status": {"required": 1}, "desk": {"required": 1}}, "_status": "ERR"
+        "_issues": {"name": {"required": 1}, "desk": {"required": 1}}, "_status": "ERR"
         }
         """
 
@@ -129,7 +123,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "todo",
         "desk": "#desks._id#"
         }
         """
@@ -138,7 +131,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "desk_order": 2
         }
@@ -147,7 +139,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "in_progress",
         "desk": "#desks._id#"
         }
         """
@@ -155,7 +146,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "in_progress",
         "desk": "#desks._id#"
         }
         """
@@ -173,7 +163,6 @@ Feature: Stages
         {
         "name": "show my content",
         "description": "Show content items created by the current logged user",
-        "task_status": "todo",
         "desk": "#desks._id#"
         }
         """
@@ -183,7 +172,6 @@ Feature: Stages
         {
         "name": "show my content",
         "description": "Show content items created by the current logged user",
-        "task_status": "todo",
         "desk": "#desks._id#"
         }
         """
@@ -213,7 +201,6 @@ Feature: Stages
         """
         {
         "name": "update expiry",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "content_expiry": 10
         }
@@ -253,7 +240,6 @@ Feature: Stages
         """
         {
         "name": "update expiry",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "content_expiry": 0
         }
@@ -327,7 +313,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "todo",
         "desk": "#desks._id#"
         }
         """
@@ -363,7 +348,6 @@ Feature: Stages
         """
         {
         "name": "show my content",
-        "task_status": "todo",
         "desk": "#desks._id#"
         }
         """
@@ -382,8 +366,10 @@ Feature: Stages
         [{"type": "text"}]
         """
         When we delete "/stages/#stages._id#"
-
-        Then we get response code 403
+        Then we get error 412
+        """
+        {"_status": "ERR", "_message": "Cannot delete stage as it has article(s) or referenced by versions of the article(s)."}
+        """
 
     @auth
     @notification
@@ -399,7 +385,6 @@ Feature: Stages
         """
         {
         "name": "stage visibility",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "is_visible" : true
         }
@@ -430,7 +415,6 @@ Feature: Stages
         """
         {
         "name": "invisible1",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "is_visible" : false
         }
@@ -440,7 +424,6 @@ Feature: Stages
         """
         {
         "name": "invisible2",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "is_visible" : false
         }
@@ -464,7 +447,6 @@ Feature: Stages
         """
         {
         "name": "invisible1",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "is_visible" : false
         }
@@ -474,7 +456,6 @@ Feature: Stages
         """
         {
         "name": "invisible2",
-        "task_status": "todo",
         "desk": "#desks._id#",
         "is_visible" : true
         }
@@ -482,3 +463,127 @@ Feature: Stages
 
 
         Then we get 2 visible stages
+
+    @auth @vocabulary
+    Scenario: Cannot delete stage if it is refered to by a routing scheme
+        Given empty "stages"
+        Given "desks"
+        """
+        [{"name": "Sports Desk"}]
+        """
+        Given we have "/filter_conditions" with "FCOND_ID" and success
+        """
+        [{
+            "name": "Sports Content",
+            "field": "subject",
+            "operator": "in",
+            "value": "04000000"
+        }]
+        """
+        And we have "/content_filters" with "FILTER_ID" and success
+        """
+        [{
+          "name": "Sports Content",
+          "content_filter": [
+              {
+                  "expression": {
+                      "fc": ["#FCOND_ID#"]
+                  }
+              }
+          ]
+        }]
+        """
+
+        When we post to "/stages"
+        """
+        {
+        "name": "show my content",
+        "desk": "#desks._id#"
+        }
+        """
+
+        When we patch "/stages/#stages._id#"
+        """
+        {"desk":"#desks._id#"}
+        """
+        And we post to "/routing_schemes"
+        """
+        [
+          {
+            "name": "routing rule scheme 1",
+            "rules": [
+              {
+                "name": "Sports Rule",
+                "filter": "#FILTER_ID#",
+                "actions": {
+                  "fetch": [
+                              {"desk": "#desks._id#",
+                                "stage": "#stages._id#",
+                                "macro": "transform"}]
+                }
+              }
+            ]
+          }
+        ]
+        """
+        When we delete "/stages/#stages._id#"
+        Then we get error 412
+        """
+        {"_status": "ERR", "_message": "Stage is referred by Ingest Routing Schemes : routing rule scheme 1"}
+        """
+
+    @auth
+    Scenario: Cannot delete default stage
+        Given empty "stages"
+        Given "desks"
+        """
+        [{"name": "Sports Desk"}]
+        """
+
+        When we post to "/stages"
+        """
+        {
+        "name": "show my content",
+        "desk": "#desks._id#"
+        }
+        """
+        When we delete "/stages/#desks.incoming_stage#"
+        Then we get error 412
+        """
+        {"_status": "ERR", "_message": "Cannot delete a default stage."}
+        """
+
+    @auth
+    @notification
+    Scenario: Cannot delete stage if there are only spiked documents
+        Given empty "archive"
+        Given empty "stages"
+        Given "desks"
+        """
+        [{"name": "Sports Desk"}]
+        """
+
+        When we post to "/stages"
+        """
+        {
+        "name": "show my content",
+        "desk": "#desks._id#"
+        }
+        """
+        Then we get OK response
+        When we patch "/stages/#stages._id#"
+        """
+        {"desk":"#desks._id#"}
+        """
+        Then we get OK response
+        When we post to "archive"
+        """
+        [{"headline": "This is spiked", "type": "text", "state": "spiked",
+            "task": {"desk": "#desks._id#", "stage": "#stages._id#"}}]
+        """
+        Then we get OK response
+        When we delete "/stages/#stages._id#"
+        Then we get error 412
+        """
+        {"_status": "ERR", "_message": "Cannot delete stage as it has article(s) or referenced by versions of the article(s)."}
+        """

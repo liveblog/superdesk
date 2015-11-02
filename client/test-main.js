@@ -29,6 +29,7 @@ tests.push('superdesk/services/modalService');
 tests.push('superdesk/services/preferencesService');
 tests.push('superdesk/features/features');
 tests.push('superdesk/services/asset');
+tests.push('superdesk/services/image-factory');
 tests.push('superdesk/privileges/privileges');
 tests.push('superdesk/notification/notification');
 tests.push('superdesk/itemList/itemList');
@@ -38,6 +39,7 @@ tests.push('superdesk/list/list');
 tests.push('superdesk/keyboard/keyboard');
 tests.push('superdesk/services/storage');
 tests.push('superdesk/beta/beta');
+tests.push('superdesk/filters');
 
 // apps
 tests.push('superdesk-authoring/authoring');
@@ -45,11 +47,16 @@ tests.push('superdesk-authoring/widgets/widgets');
 tests.push('superdesk-authoring/comments/comments');
 tests.push('superdesk-authoring/workqueue/workqueue');
 tests.push('superdesk-authoring/metadata/metadata');
-tests.push('superdesk-authoring/versioning/versions');
+tests.push('superdesk-authoring/versioning/versioning');
+tests.push('superdesk-authoring/versioning/versions/versions');
+tests.push('superdesk-authoring/versioning/history/history');
 tests.push('superdesk-authoring/packages/packages');
 tests.push('superdesk-authoring/editor/find-replace');
 tests.push('superdesk-authoring/multiedit/multiedit');
 tests.push('superdesk-authoring/macros/macros');
+
+tests.push('superdesk-content-filters/content-filters');
+
 tests.push('superdesk-workspace/content/content');
 tests.push('superdesk-packaging/packaging');
 tests.push('superdesk-desks/desks');
@@ -73,16 +80,18 @@ tests.push('superdesk-archive/module');
 tests.push('superdesk-archive/directives');
 
 tests.push('superdesk-dictionaries/dictionaries');
+tests.push('superdesk-vocabularies/vocabularies');
 tests.push('superdesk-publish/publish');
-tests.push('superdesk-publish/filters/publish-filters');
 tests.push('superdesk/editor/spellcheck/spellcheck');
 tests.push('superdesk-templates/templates');
+tests.push('superdesk-highlights/highlights');
 tests.push('superdesk-monitoring/monitoring');
 tests.push('superdesk-workspace/workspace');
 
 // libs
 tests.push('bower_components/ment.io/dist/mentio');
 tests.push('angular-ui');
+tests.push('angular-resource');
 tests.push('angular-route');
 tests.push('angular-file-upload');
 tests.push('moment');

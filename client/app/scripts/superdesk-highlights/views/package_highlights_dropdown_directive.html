@@ -1,8 +1,11 @@
-<div id="highlightPackage" ng-if="hasHighlights" tooltip="{{ :: 'Create highlight' | translate }}" tooltip-placement="left">
-    <button class="dropdown-toggle" dropdown-toggle><i class="svg-icon-create-list"></i></button>
-    <ul class="dropdown-menu pull-right">
-		<li ng-repeat="h in highlights"> 
-		    <button option="{{ h.name | uppercase  }}" ng-click="createHighlight(h);">{{ h.name | uppercase  }}</button>
-		</li>
-	</ul>
+<div id="highlightPackage" title="{{ :: 'Highlights' | translate }}"> 
+    <button class="dropdown-toggle" ng-click="hideMonitoring(currentRoute.href === '/workspace/highlights', $event)"><i class="big-icon-marked-star"></i></button>
+    <ul class="dropdown-menu pull-left">
+        <li ng-if="hasHighlights" ng-repeat="h in highlights track by h._id">
+            <button option="{{ h.name }}" ng-click="listHighlight(h);">{{ h.name }}</button>
+        </li>
+        <li ng-if="!hasHighlights">
+            <button ng-disabled="true">{{::'No available highlights'|translate}}</button>
+        </li>
+    </ul>
 </div>

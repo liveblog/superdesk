@@ -8,6 +8,7 @@
 /* ====================================== */
    // item(news) urgency colors and labels
 
+	@outputItemColor0 : #8a8a8a;
 	@outputItemColor1 : #005e84;
 	@outputItemColor2 : #64a4bf;
 	@outputItemColor3 : #b0cfdd;
@@ -20,22 +21,22 @@
 		text-align: center;
 		color:#fff;
 		font-size: 10px;
+                background: @outputItemColor0;
 		.box-sizing(border-box);
 		line-height: 17px;
 		vertical-align: top;
-		visibility: hidden;
-                font-style: normal;
+	  	font-style: normal;
+		&.label-0 {
+			background: @outputItemColor0;
+		}
 		&.label-1 {
 			background: @outputItemColor1;
-			visibility: visible;
 		}
 		&.label-2 {
 			background: @outputItemColor2;
-			visibility: visible;
 		}
 		&.label-3, &.label-4, &.label-5 {
 			background: @outputItemColor3;
-			visibility: visible;
 		}
 	}
 
@@ -73,7 +74,7 @@
 	&.wide {
 		left:10px;
 	}
-	.fitler-trigger {
+	.filter-trigger {
 		width: 48px;
 		height: 48px;
 		line-height: 48px;
@@ -342,7 +343,8 @@
 			text-overflow: ellipsis;
 			height:18px;
 			font-size:11px;
-			color:#444;
+                        margin: 0 2px;
+			color: @sd-keyword;
 			text-transform: uppercase;
 			&.shifted {
 				left: 20px;
@@ -404,6 +406,12 @@
 			position: absolute;
 			bottom: 7px;
 			left: 36px;
+		}
+
+	  	.priority-label {
+			position: absolute;
+			bottom: 7px;
+			left: 60px;
 		}
 
 		.state-label {
@@ -495,6 +503,11 @@
 			}
 
 		}
+                
+                .item-right {
+                    top: auto;
+                    height: 31px;
+                }
 	}
 }
 
@@ -522,13 +535,13 @@
 /* ====================================== */
   // media box list view
 
-@rightfield-width:150px;
+@rightfield-width:60px;
 
 .mlist-view, .compact-view {
-
+	box-shadow: @block-shadow-depth-2;
 	.list-item-view {
 		width: 100%;
-        .box-shadow(0 1px 4px 0 rgba(0,0,0,20%));
+        //.box-shadow(0 1px 4px 0 rgba(0,0,0,20%));
         &:last-child {
             .media-box {
                 border-bottom: none;
@@ -552,10 +565,17 @@
 			.list-field {
 				border-color:#ebebeb;
 			}
+			.item-info {
+			padding: 10px 30px 10px 10px;
+			}
+			.more-activity-toggle {
+			    background: linear-gradient(to right, rgba(244,244,244,0) 0%,rgba(244,244,244,0) 0%,rgba(244,244,244,1) 40%) !important;
+			}
+
 		}
 
 		.list-field {
-			border-left: 1px solid #f4f4f4;
+			border-right: 1px solid rgba(0,0,0,0.06);
 			float: left;
 			padding: 10px;
 			height: 36px;
@@ -575,8 +595,9 @@
 
 		.type-icon {
 			text-align: center;
-			width: 44px;
+			width: 36px;
 			height: 56px;
+			padding: 10px 5px;
 			.box-sizing(border-box);
 
 			i {
@@ -603,43 +624,30 @@
 				float: left;
 			}
 		}
-
-
 		.urgency {
 			i {
 				//margin-top: -4px;
 			}
 		}
-
-		.word-count-box {
-			width: 50px;
-			span {
-				display: block;
-			}
-			.word-count {
-				height: 18px;
-				.text-semibold();
-			}
-			.signal {
-				background: #e7e7e7;
-				padding: 2px 4px;
-				.border-radius(2px);
-				text-transform: uppercase;
-				font-size: 10px;
-				float: left;
-				.text-semibold();
-				line-height: 12px;
-				margin-top: 1px;
+		.word-count {
+			.text-bold();
+			font-size: 12px;
+			margin-right: 8px;
+			display: table-cell;
+			&:empty {
+				margin-right: 0px;
 			}
 		}
 
 		.item-info {
-			padding: 10px;
+			padding: 10px 10px 10px 10px;
 			.line {
 				height: 18px;
 				line-height: 18px;
 				position: relative;
-				margin-left: 142px;
+				margin-left: 75px;
+				display: flex;
+				box-sizing: border-box;
 				dl {
 					margin: 0;
 				}
@@ -653,25 +661,60 @@
 			}
 			.state-label {
 				margin-top: 2px;
+				line-height: 14px;
+				.border-radius(2px);
+				margin-right: 10px;
+				.text-semibold();
+			}
+			.signal {
+				display: inline-block;
+				background: rgba(0,0,0,0.1);
+				padding: 1px 5px;
+				.border-radius(2px);
+				text-transform: uppercase;
+				font-size: 9px;
+				letter-spacing: 0.08em;
+				.text-semibold();
+				line-height: 14px;
+				margin-top: 2px;
+				margin-right: 10px;
 			}
 			.headline {
 				color: #686b6c;
 				margin-right:  @rightfield-width + 5px;
-				overflow: hidden;
-				text-overflow: ellipsis;
-				white-space: nowrap;
+				display: flex;
+				flex-grow: 1;
+				display:table;
 			}
 			.keyword {
 				.text-semibold();
 				color: @sd-keyword;
 				text-transform: uppercase;
 				font-size: 12px;
-				margin-right: 20px;
+				margin-right: 10px;
+				white-space: nowrap;
+			}
+			.highlights-box {
+                                margin-top: -2px;
+				margin-right: 5px;
+			}
+			.item-heading {
+				flex-grow: 1;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				margin: 0;
+				p {
+					overflow: hidden;
+					text-overflow: ellipsis;
+					white-space: nowrap;
+					margin: 0;
+				}
 			}
 			.container {
 				.text-semibold();
 				color: #444;
-				margin-left: 20px;
+				margin-right: 10px;
 			}
 			.takekey {
 				color: #333;
@@ -680,13 +723,13 @@
 			}
 			.category {
 				color: #444;
-				margin-right: 20px;
+				margin-right: 10px;
 				float: left;
 			}
 			.provider {
 				color: #686b6c;
 				float: left;
-				margin-right: 20px;
+				margin-right: 10px;
 			}
 			.expires {
 				float: right;
@@ -699,52 +742,13 @@
 				margin-top: 4px;
 			}
 			time {
-				position: absolute;
-				top:0; right: 0;
 				font-size: 11px;
 				color: @grayLight;
-			}
-		}
-		.item-right {
-			border-left: 0;
-			min-width: @rightfield-width;
-			position: absolute;
-			right: 0;
-			top:0;
-			text-align: right;
-			padding: 0;
-			.action {
-				background: #f4f4f4;
-				position: relative;
-				right: -2px; bottom: 0;
-				min-width: @rightfield-width;
-				display: none;
-				.item-functions {
-					.item-field {
-						a {
-							display: inline-block;
-							padding: 10px 20px;
-							height: 35px;
-							line-height: 35px;
-							text-align: center;
-							vertical-align: middle;
-							.actioning {
-								background-image: url("../../images/loading-small.gif");
-								background-repeat: no-repeat;
-			    				background-position: center;
-								display: inline-block;
-								height: 35px;
-								line-height: 35px;
-								text-align: center;
-								vertical-align: middle;
-							}
-						}
-						button {
-							margin-top: 7px;
-						}
-					}
-				}
-
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				min-width: 60px;
+				text-align: right;
 			}
 		}
 
@@ -779,6 +783,12 @@
 	}
 }
 
+.more-activity-menu.dropdown-menu {
+	margin: 8px 0;
+	&:before {
+		display: none;
+	}
+}
 
 .mgrid-view, #scratchpad {
 	.active {
@@ -790,10 +800,16 @@
 }
 .mlist-view, .compact-view  {
 	.active {
+		.more-activity-toggle {
+			background: linear-gradient(to right, rgba(239,247,250,0) 0%,rgba(239,247,250,0) 0%,rgba(239,247,250,1) 40%) !important;
+		}
 		.media-box {
 			background-color: #eff7fa !important;
 			border-right: 2px solid rgba(94,169,200,0.75) !important;
 			&:hover {
+				.more-activity-toggle {
+					background: linear-gradient(to right, rgba(239,247,250,0) 0%,rgba(239,247,250,0) 0%,rgba(239,247,250,1) 40%) !important;
+				}
 				.item-functions {
 					background-color: #eff7fa;
 					.item-field {
@@ -986,8 +1002,81 @@
 	}
 }
 
-figure.media {
-	img {
-		max-width: 100%;
+.cropItems{
+	li{
+		display: inline-block;
+		max-width: 47%;
+
+		&:nth-child(2n){
+			float: right;
+
+			figure.media {
+	 			img{
+					float: right;
+				}
+			}
+		}
+
+		figure.media {
+            @media only screen and (min-width : 1630px) {
+     			img{
+					max-height: 170px;
+				}
+            }
+            @media only screen and (max-width : 1630px) {
+     			img{
+					max-height: 140px;
+				}
+            }
+		}
 	}
+}
+
+// Styling for action menu
+// -------------------------------------------------------------
+.item-right {
+    width: 48px;
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    padding: 0;
+    background: transparent;
+    z-index: 3;
+
+    .more-activity-dropdown {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        .submenu {
+            overflow: hidden;
+            display: block;
+        }
+        &.open {
+            i {
+                opacity: 1;
+            }
+        }
+    }
+    .more-activity-toggle {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        right: 0;
+        top: 0;
+        text-align: center;
+        vertical-align: middle;
+        border: none;
+        background: none;
+        background: linear-gradient(to right, rgba(255,255,255,0) 0%,rgba(255,255,255,0) 0%,rgba(255,255,255,1) 40%);
+        i {
+            opacity: 0.4;
+            margin-right: -14px; 
+        }
+        &:hover {
+            i {
+                opacity: 1;
+            }
+        }
+    }
 }

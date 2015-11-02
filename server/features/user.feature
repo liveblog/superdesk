@@ -16,15 +16,6 @@ Feature: User Resource
         And we get activation email
 
     @auth
-    Scenario: Create user with valid email
-        Given empty "users"
-        When we post to "/users"
-        """
-        {"username": "foo", "password": "barbar", "email": "foo@bar.com.au", "sign_off": "fubar"}
-        """
-        Then we get response code 201
-
-    @auth
     Scenario: Test email validation
         Given empty "users"
         When we post to "/users"
@@ -72,8 +63,12 @@ Feature: User Resource
         """
         When we get "/users"
         Then we get list with +2 items
+        And we get users
+        """
+        ["bar", "foo"]
+        """
 
-    @auth
+    @auth @test
     Scenario: Fetch single user
         Given "users"
         """
@@ -261,7 +256,7 @@ Feature: User Resource
 
     @auth
     Scenario: A logged-in user can't delete themselves from the system
-        Given we login as user "foo" with password "bar"
+        Given we login as user "foo" with password "bar" and user type "user"
         When we delete "/users/#user._id#"
         Then we get error 403
 
@@ -271,7 +266,7 @@ Feature: User Resource
         """
         [{"name": "A", "is_default": true}, {"name": "B"}]
         """
-        And we login as user "foo" with password "bar"
+        And we login as user "foo" with password "bar" and user type "user"
         """
         {"user_type": "user", "email": "foo.bar@foobar.org"}
         """
@@ -308,24 +303,12 @@ Feature: User Resource
         """
         And we post to "/stages"
         """
-        {
-        "name": "invisible1",
-        "task_status": "todo",
-        "desk": "#desks._id#",
-        "is_visible" : false
-        }
+        {"name": "invisible1", "task_status": "todo", "desk": "#desks._id#", "is_visible" : false}
         """
-
         When we post to "/stages"
         """
-        {
-        "name": "invisible2",
-        "task_status": "todo",
-        "desk": "#desks._id#",
-        "is_visible" : false
-        }
+        {"name": "invisible2", "task_status": "todo", "desk": "#desks._id#", "is_visible" : false}
         """
-
         Then we get 2 invisible stages for user
         """
         {"user": "#users._id#"}
@@ -348,4 +331,66 @@ Feature: User Resource
         Then we get existing resource
         """
         {"username": "foo", "desk": "#desks._id#"}
+        """
+
+    @ldapauth @auth
+    Scenario: Fetch user from LDAP
+        Given "users"
+        """
+        [{"username": "foo", "password": "barbar", "email": "foo@bar.com", "sign_off": "fb"}]
+        """
+        When we get "/users/#users._id#"
+        Then we get existing resource
+        """
+        {
+            "username": "foo", "display_name": "foo",
+            "email": "foo@bar.com", "is_active": true,
+            "needs_activation": false,
+            "_readonly": {"first_name": true, "last_name": true, "phone": true, "email": true }
+        }
+        """
+
+    @auth
+    Scenario: Sign Off property is set to first 3 characters of username while creating a User
+        Given "users"
+        """
+        [{"username": "foobar", "password": "barbar", "email": "foo@bar.com"}]
+        """
+        When we get "/users/#users._id#"
+        Then we get existing resource
+        """
+        {"username": "foobar", "sign_off": "FOO"}
+        """
+
+    @dbauth @auth
+    Scenario: Sign Off property is set to first letter of First Name and Last Name while creating a User
+        Given "users"
+        """
+        [{"first_name": "Foo", "last_name": "Bar", "username": "foobar", "password": "barbar", "email": "foo@bar.com"}]
+        """
+        When we get "/users/#users._id#"
+        Then we get existing resource
+        """
+        {"username": "foobar", "sign_off": "FB"}
+        """
+
+   @dbauth @auth
+    Scenario: Update to Sign Off succeeds when the default value is modified
+        Given "users"
+        """
+        [{"username": "foobar", "password": "barbar", "email": "foo@bar.com"}]
+        """
+        When we get "/users/#users._id#"
+        Then we get existing resource
+        """
+        {"username": "foobar", "sign_off": "FOO"}
+        """
+        When we patch "/users/#users._id#"
+        """
+        {"first_name": "foo", "last_name": "bar", "sign_off": "FBAR"}
+        """
+        When we get "/users/#users._id#"
+        Then we get existing resource
+        """
+        {"username": "foobar", "sign_off": "FBAR"}
         """

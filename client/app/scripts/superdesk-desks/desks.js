@@ -97,16 +97,13 @@
                 scope.cachePreviousItems = [];
 
                 scope.preview = function(item) {
-                    desks.setWorkspace(item.task.desk, item.task.stage);
-                    if (!sessionStorage.getItem('previewUrl')) {
-                        sessionStorage.setItem('previewUrl', $location.url());
-                    }
-                    superdesk.intent('read_only', 'content_article', item);
+                    superdesk.intent('preview', 'item', item);
                 };
 
                 scope.edit = function(item) {
-                    desks.setWorkspace(item.task.desk, item.task.stage);
-                    superdesk.intent('author', 'article', item);
+                    superdesk.intent('edit', 'item', item).then(null, function() {
+                        superdesk.intent('view', 'item', item);
+                    });
                 };
 
                 function queryItems(queryString) {
@@ -127,6 +124,12 @@
                 scope.$watch('filter', queryItems);
                 scope.$on('task:stage', function(event, data) {
                     if (scope.stage && (data.new_stage === scope.stage || data.old_stage === scope.stage)) {
+                        queryItems();
+                    }
+                });
+
+                scope.$on('content:update', function($event, data) {
+                    if (cards.shouldUpdate(scope.stage, data)) {
                         queryItems();
                     }
                 });
@@ -373,6 +376,7 @@
         //expecting $scope.desks to be defined
 
         $scope.modalActive = false;
+        $scope.numberOfUsers = 3;
         $scope.step = {
             current: null
         };
@@ -397,7 +401,9 @@
                 function runConfirmed() {
                     desks.remove(desk).then(
                         function(response) {
-                            _.remove($scope.desks._items, desk);
+                            _.remove($scope.desks._items, function(deskToBeRemoved) {
+                                return deskToBeRemoved.name.toLowerCase() === desk.name.toLowerCase();
+                            });
                             notify.success(gettext('Desk deleted.'), 3000);
                         },
                         function(response) {
@@ -411,9 +417,18 @@
                 }
             );
         };
+
+        $scope.getDeskStages = function(desk) {
+            return desks.deskStages[desk._id];
+        };
+
+        $scope.getDeskUsers = function (desk) {
+            return desks.deskMembers[desk._id];
+        };
     }
 
     var app = angular.module('superdesk.desks', [
+        'superdesk.ui',
         'superdesk.users',
         'superdesk.authoring.widgets',
         'superdesk.aggregate.widgets',
@@ -432,7 +447,10 @@
                     label: gettext('Master Desk'),
                     description: gettext('Navigate through the newsroom'),
                     templateUrl: 'scripts/superdesk-desks/views/main.html',
+                    sideTemplateUrl: 'scripts/superdesk-workspace/views/workspace-sidenav.html',
                     controller: DeskListController,
+                    priority: -100,
+                    adminTools: false,
                     category: superdesk.MENU_MAIN,
                     privileges: {desks: 1}
                 })
@@ -454,8 +472,8 @@
                 }
             });
         }])
-        .factory('desks', ['$q', 'api', 'preferencesService', 'userList', 'notify', 'session',
-            function($q, api, preferencesService, userList, notify, session) {
+        .factory('desks', ['$q', 'api', 'preferencesService', 'userList', 'notify', 'session', '$filter',
+            function($q, api, preferencesService, userList, notify, session, $filter) {
 
                 var userDesks, userDesksPromise;
 
@@ -463,8 +481,7 @@
                     page = page || 1;
                     items = items || [];
 
-                    return api(endpoint)
-                    .query({max_results: 200, page: page})
+                    return api.query(endpoint, {max_results: 200, page: page})
                     .then(function(result) {
                         items = items.concat(result._items);
                         if (result._links.next) {
@@ -509,6 +526,8 @@
 
                         return _fetchAll('desks')
                         .then(function(items) {
+                            items = $filter('sortByName')(items);
+
                             self.desks = {_items: items};
                             _.each(items, function(item) {
                                 self.deskLookup[item._id] = item;
@@ -537,6 +556,21 @@
                             });
                         });
                     },
+                    fetchDeskStages: function(desk) {
+                        var self = this;
+
+                        if (self.deskStages[desk]) {
+                            return $q.when().then(returnDeskStages);
+                        } else {
+                            return self.fetchStages()
+                                .then(angular.bind(self, self.generateDeskStages))
+                                .then(returnDeskStages);
+                        }
+
+                        function returnDeskStages() {
+                            return self.deskStages[desk];
+                        }
+                    },
                     generateDeskMembers: function() {
                         var self = this;
 
@@ -562,7 +596,13 @@
                         return $q.when();
                     },
                     fetchUserDesks: function(user) {
-                        return api.get(user._links.self.href + '/desks');
+                        return api.get(user._links.self.href + '/desks').then(function(response) {
+                            if (response && response._items) {
+                                response._items = $filter('sortByName')(response._items);
+                            }
+
+                            return $q.when(response);
+                        });
                     },
 
                     /**
@@ -806,12 +846,14 @@
                 }
             };
         }])
-        .directive('sdDeskeditBasic', ['gettext', 'desks', 'WizardHandler', function(gettext, desks, WizardHandler) {
+        .directive('sdDeskeditBasic', ['gettext', 'desks', 'WizardHandler', 'metadata', '$filter',
+            function(gettext, desks, WizardHandler, metadata, $filter) {
             return {
 
                 link: function(scope, elem, attrs) {
 
                     scope.limits = limits;
+                    scope.deskTypes = [];
 
                     scope.$watch('step.current', function(step) {
                         if (step === 'general') {
@@ -839,6 +881,7 @@
                                 _.extend(origDesk, scope.desk.edit);
                             }
 
+                            scope.desks._items = $filter('sortByName')(scope.desks._items);
                             desks.deskLookup[scope.desk.edit._id] = scope.desk.edit;
                             WizardHandler.wizard('desks').next();
                         }, errorMessage);
@@ -867,6 +910,15 @@
                             scope._errorLimits = scope.desk.edit.name.length > scope.limits.desk ? true : null;
                         }
                     };
+
+                    if (metadata.values.desk_types) {
+                        scope.deskTypes = metadata.values.desk_types;
+                    } else {
+                        metadata.fetchMetadataValues()
+                            .then(function() {
+                                scope.deskTypes = metadata.values.desk_types;
+                            });
+                    }
 
                 }
             };
@@ -1027,8 +1079,12 @@
                             desks.fetchDeskById(stage.desk).then(function(desk) {
                                 scope.desk.edit = desk;
                             });
-                        }, function(result) {
-                            scope.message = gettext('There was a problem, stage was not deleted.');
+                        }, function(response) {
+                            if (angular.isDefined(response.data._message)) {
+                                scope.message = gettext('Error: ' + response.data._message);
+                            } else {
+                                scope.message = gettext('There was a problem, stage was not deleted.');
+                            }
                         });
                     };
 
@@ -1156,7 +1212,7 @@
                     });
 
                     scope.add = function(user) {
-                        scope.deskMembers.push(user);
+                        scope.deskMembers.unshift(user);
                     };
 
                     scope.remove = function(user) {
@@ -1185,13 +1241,27 @@
                 }
             };
         }])
-        .directive('sdDeskeditMacros', ['macros', 'WizardHandler', 'desks',  '$rootScope',
-            function (macros, WizardHandler, desks, $rootScope) {
+
+        /**
+         * @memberof superdesk.desks
+         * @ngdoc directive
+         * @name sdDeskeditMacros
+         * @description
+         *   Fetches and stores a list of macros for the current desk (if set,
+         *   otherwise all macros), and defines the "previous" and "next"
+         *   methods in the element's scope used by the Wizard handler.
+         */
+        .directive('sdDeskeditMacros', ['macros', 'WizardHandler',
+            function (macros, WizardHandler) {
             return {
                 link: function(scope) {
                     if (scope.desk && scope.desk.edit) {
                         macros.getByDesk(scope.desk.edit.name).then(function(macros) {
                             scope.macros = macros;
+                        });
+                    } else {
+                        macros.get().then(function (macroList) {
+                            scope.macros = macroList;
                         });
                     }
 

@@ -13,12 +13,19 @@ Feature: Link content in takes
             "type": "text",
             "headline": "test1",
             "slugline": "comics",
+            "abstract" : "abstract",
             "anpa_take_key": "Take",
             "guid": "123",
             "state": "draft",
             "task": {
                 "user": "#CONTEXT_USER_ID#"
-            }
+            },
+            "priority": 1,
+            "urgency": 1,
+            "ednote": "ednote",
+            "place": [{"is_active": true, "name": "ACT", "qcode": "ACT",
+                  "state": "Australian Capital Territory",
+                  "country": "Australia", "world_region": "Oceania"}]
         }]
         """
         And we post to "/archive/123/move"
@@ -34,10 +41,17 @@ Feature: Link content in takes
         """
         {
             "type": "text",
-            "headline": "test1=2",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=2",
+            "abstract" : "abstract",
             "state": "draft",
+            "priority": 1,
+            "urgency": 1,
+            "ednote": "ednote",
+            "place": [{"is_active": true, "name": "ACT", "qcode": "ACT",
+                  "state": "Australian Capital Territory",
+                  "country": "Australia", "world_region": "Oceania"}],
             "original_creator": "#CONTEXT_USER_ID#",
             "takes": {
                 "_id": "#TAKE_PACKAGE#",
@@ -65,7 +79,7 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#TAKE#",
                                     "sequence": 2
@@ -77,11 +91,11 @@ Feature: Link content in takes
                     "package_type": "takes",
                     "task": {"desk": "#desks._id#", "stage": "#desks.incoming_stage#"},
                     "sequence": 2,
-                    "_current_version": 2
+                    "_current_version": 1
                 },
                 {
                     "_id": "#TAKE#",
-                    "headline": "test1=2",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}],
                     "takes": {}
@@ -105,7 +119,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE2#",
             "type": "text",
-            "headline": "test1=3",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=3",
             "state": "draft",
@@ -136,7 +150,7 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "sequence": 2
                                 }
@@ -145,11 +159,11 @@ Feature: Link content in takes
                     ],
                     "type": "composite",
                     "package_type": "takes",
-                    "_current_version": 3
+                    "_current_version": 2
                 },
                 {
                     "_id": "#TAKE#",
-                    "headline": "test1=2",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}],
                     "takes": {}
@@ -163,7 +177,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#TAKE2#",
-                    "headline": "test1=3",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}],
                     "takes": {}
@@ -187,7 +201,7 @@ Feature: Link content in takes
         When we post to "/subscribers" with success
         """
         {
-          "name":"News1","media_type":"media", "subscriber_type": "digital",
+          "name":"News1","media_type":"media", "subscriber_type": "wire",
           "sequence_num_settings":{"min" : 1, "max" : 10}, "email": "test@test.com",
           "destinations":[{"name":"destination1","format": "nitf", "delivery_type":"FTP","config":{"ip":"144.122.244.55","password":"xyz"}}]
         }
@@ -226,7 +240,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE#",
             "type": "text",
-            "headline": "Take-1 headline=2",
+            "headline": "Take-1 headline",
             "slugline": "Take-1 slugline",
             "anpa_take_key": "Take=2",
             "state": "draft",
@@ -260,7 +274,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE2#",
             "type": "text",
-            "headline": "Take-1 headline=3",
+            "headline": "Take-1 headline",
             "slugline": "Take-1 slugline",
             "anpa_take_key": "Take=3",
             "state": "draft",
@@ -273,6 +287,18 @@ Feature: Link content in takes
             "linked_in_packages": [{"package_type" : "takes","package" : "#TAKE_PACKAGE#"}]
         }
         """
+        When we patch "/archive/#TAKE#"
+        """
+        {"body_html": "Take-2", "abstract": "Take-1 abstract changed", "state": "in_progress"}
+        """
+        And we post to "/archive/#TAKE#/move"
+        """
+        [{"task": {"desk": "#desks._id#", "stage": "#desks.incoming_stage#"}}]
+        """
+        And we publish "#TAKE#" with "publish" type and "published" state
+        Then we get OK response
+        When we get "/publish_queue"
+        Then we get "Take-1 headline=2" in formatted output
 
     @auth
     Scenario: In a takes packages only last take can be spiked.
@@ -309,7 +335,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE2#",
             "type": "text",
-            "headline": "test1=2",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=2",
             "state": "draft",
@@ -340,7 +366,7 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#TAKE2#",
                                     "sequence": 2
@@ -356,7 +382,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#TAKE2#",
-                    "headline": "test1=2",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}],
                     "takes": {}
@@ -380,7 +406,7 @@ Feature: Link content in takes
         {
             "_id": "#LAST_TAKE#",
             "type": "text",
-            "headline": "test1=3",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=3",
             "state": "draft",
@@ -411,13 +437,13 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#TAKE2#",
                                     "sequence": 2
                                 },
                                 {
-                                    "headline": "test1=3",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#LAST_TAKE#",
                                     "sequence": 3
@@ -431,7 +457,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#TAKE2#",
-                    "headline": "test1=2",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}]
                 },
@@ -443,7 +469,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#LAST_TAKE#",
-                    "headline": "test1=3",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}]
                 }
@@ -481,7 +507,7 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#TAKE2#",
                                     "sequence": 2
@@ -495,7 +521,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#TAKE2#",
-                    "headline": "test1=2",
+                    "headline": "test1",
                     "type": "text",
                     "linked_in_packages": [{"package_type": "takes"}]
                 },
@@ -507,7 +533,7 @@ Feature: Link content in takes
                 },
                 {
                     "_id": "#LAST_TAKE#",
-                    "headline": "test1=3",
+                    "headline": "test1",
                     "type": "text",
                     "state": "spiked"
                 }
@@ -578,7 +604,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE2#",
             "type": "text",
-            "headline": "test1=2",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=2",
             "state": "draft",
@@ -602,7 +628,7 @@ Feature: Link content in takes
         {
             "last_take": "#TAKE2#",
             "sequence": 2,
-            "_current_version": 2,
+            "_current_version": 1,
             "groups":[
                         {"id": "root", "refs": [{"idRef": "main"}]},
                         {
@@ -615,7 +641,7 @@ Feature: Link content in takes
                                     "sequence": 1
                                 },
                                 {
-                                    "headline": "test1=2",
+                                    "headline": "test1",
                                     "slugline": "comics",
                                     "residRef": "#TAKE2#",
                                     "sequence": 2
@@ -634,7 +660,7 @@ Feature: Link content in takes
         {
             "_id": "#TAKE3#",
             "type": "text",
-            "headline": "test1=3",
+            "headline": "test1",
             "slugline": "comics",
             "anpa_take_key": "Take=3",
             "state": "draft",
@@ -657,7 +683,7 @@ Feature: Link content in takes
         {
             "last_take": "#TAKE3#",
             "sequence": 3,
-            "_current_version": 3
+            "_current_version": 2
         }
         """
         When we publish "123" with "publish" type and "published" state
@@ -683,7 +709,7 @@ Feature: Link content in takes
         {
             "last_take": "123",
             "sequence": 1,
-            "_current_version": 7,
+            "_current_version": 6,
             "groups":[
                         {"id": "root", "refs": [{"idRef": "main"}]},
                         {
@@ -698,5 +724,80 @@ Feature: Link content in takes
                             ]
                         }
                 ]
+        }
+        """
+
+    @auth @test
+    Scenario: If the user is the member of a desk then New Take on a desk is allowed
+        Given "desks"
+        """
+        [{"name": "Sports"}]
+        """
+        When we post to "archive"
+        """
+        [{
+            "guid": "123",
+            "type": "text",
+            "headline": "test1",
+            "slugline": "comics",
+            "abstract" : "abstract",
+            "anpa_take_key": "Take",
+            "guid": "123",
+            "state": "draft",
+            "task": {
+                "user": "#CONTEXT_USER_ID#"
+            },
+            "priority": 1,
+            "urgency": 1,
+            "ednote": "ednote",
+            "place": [{"is_active": true, "name": "ACT", "qcode": "ACT",
+                  "state": "Australian Capital Territory",
+                  "country": "Australia", "world_region": "Oceania"}]
+        }]
+        """
+        And we post to "/archive/123/move"
+        """
+        [{"task": {"desk": "#desks._id#", "stage": "#desks.incoming_stage#"}}]
+        """
+        Then we get OK response
+        When we post to "archive/123/link"
+        """
+        [{"desk": "#desks._id#"}]
+        """
+        Then we get error 403
+        """
+        {"_message": "No privileges to create new take on requested desk.", "_status": "ERR"}
+        """
+        When we patch "desks/#desks._id#"
+        """
+        {"members": [{"user": "#CONTEXT_USER_ID#"}]}
+        """
+        Then we get OK response
+        When we post to "archive/123/link"
+        """
+        [{"desk": "#desks._id#"}]
+        """
+        Then we get next take as "TAKE2"
+        """
+        {
+            "_id": "#TAKE2#",
+            "type": "text",
+            "headline": "test1",
+            "slugline": "comics",
+            "anpa_take_key": "Take=2",
+            "abstract" : "abstract",
+            "original_creator": "#CONTEXT_USER_ID#",
+            "takes": {
+                "_id": "#TAKE_PACKAGE#",
+                "package_type": "takes",
+                "type": "composite"
+            },
+            "linked_in_packages": [{"package_type" : "takes","package" : "#TAKE_PACKAGE#"}],
+            "priority": 1,
+            "urgency": 1,
+            "ednote": "ednote",
+            "place": [{"is_active": true, "name": "ACT", "qcode": "ACT",
+                  "state": "Australian Capital Territory",
+                  "country": "Australia", "world_region": "Oceania"}]
         }
         """

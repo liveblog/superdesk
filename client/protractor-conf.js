@@ -24,13 +24,16 @@ exports.config = {
 
     framework: 'jasmine2',
     jasmineNodeOpts: {
-        showColors: true
+        showColors: true,
+        defaultTimeoutInterval: 120000
     },
 
     capabilities: {
         browserName: 'chrome',
         chromeOptions: getChromeOptions()
     },
+
+    directConnect: true,
 
     onPrepare: function() {
         require('./spec/helpers/setup')({fixture_profile: 'app_prepopulate_data'});

@@ -6,6 +6,7 @@ describe('desks service', function() {
     var USER_URL = 'users/1';
 
     beforeEach(module('superdesk.desks'));
+    beforeEach(module('superdesk.templates-cache'));
 
     it('can fetch current user desks',
     inject(function(desks, session, api, preferencesService, $rootScope, $q) {
@@ -99,6 +100,21 @@ describe('desks service', function() {
         expect(active).toBe(desks.active);
         desks.setCurrentStageId('stage');
         expect(active).toBe(desks.active);
+    }));
+
+    it('can get stages for given desk', inject(function(desks, api, $q, $rootScope) {
+        spyOn(api, 'query').and.returnValue($q.when({
+            _items: [{'desk': 'foo'}, {'desk': 'bar'}],
+            _links: {}
+        }));
+
+        var stages;
+        desks.fetchDeskStages('foo').then(function(_stages) {
+            stages = _stages;
+        });
+
+        $rootScope.$apply();
+        expect(stages.length).toBe(1);
     }));
 
     describe('getCurrentDeskId() method', function () {

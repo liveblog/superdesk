@@ -12,17 +12,18 @@
 import os
 from datetime import datetime, timedelta
 from superdesk.io.commands.update_ingest import LAST_ITEM_UPDATE
+import superdesk
 import superdesk.tests as tests
 from behave import given, when, then  # @UnresolvedImport
 from flask import json
 from eve.methods.common import parse
 from superdesk import default_user_preferences, get_resource_service, utc
-from superdesk.utc import utcnow
+from superdesk.utc import utcnow, get_expiry_date
 from eve.io.mongo import MongoJSONEncoder
 from base64 import b64encode
 
 from wooper.general import fail_and_print_body, apply_path, \
-    parse_json_response
+    parse_json_response, WooperAssertionError
 from wooper.expect import (
     expect_status, expect_status_in,
     expect_json, expect_json_length,
@@ -38,6 +39,8 @@ from re import findall
 from eve.utils import ParsedRequest
 import shutil
 from apps.dictionaries.resource import DICTIONARY_FILE
+from test_factory import setup_auth_user
+
 
 external_url = 'http://thumbs.dreamstime.com/z/digital-nature-10485007.jpg'
 
@@ -64,8 +67,7 @@ def test_key_is_present(key, context, response):
     :param context
     :param response
     """
-    assert not isinstance(context[key], bool) or \
-        not response[key], \
+    assert not isinstance(context[key], bool) or not response[key], \
         '"%s" should be empty or false, but it was "%s" in (%s)' % (key, response[key], response)
 
 
@@ -118,6 +120,10 @@ def get_res(url, context):
     response = context.client.get(get_prefixed_url(context.app, url), headers=context.headers)
     expect_status(response, 200)
     return json.loads(response.get_data())
+
+
+def parse_date(datestr):
+    return datetime.strptime(datestr, "%Y-%m-%dT%H:%M:%S%z")
 
 
 def assert_200(response):
@@ -176,7 +182,18 @@ def patch_current_user(context, data):
 def apply_placeholders(context, text):
     placeholders = getattr(context, 'placeholders', {})
     for placeholder in findall('#([^#"]+)#', text):
-        if placeholder not in placeholders:
+        if placeholder.startswith('DATE'):
+            value = utcnow()
+            unit = placeholder.find('+')
+            if unit != -1:
+                value += timedelta(days=int(placeholder[unit + 1]))
+            else:
+                unit = placeholder.find('-')
+                if unit != -1:
+                    value -= timedelta(days=int(placeholder[unit + 1]))
+
+            value = value.strftime("%Y-%m-%dT%H:%M:%S%z")
+        elif placeholder not in placeholders:
             try:
                 resource_name, field_name = placeholder.lower().split('.', maxsplit=1)
             except:
@@ -251,7 +268,7 @@ def step_impl_given_resource_with_provider(context, provider):
 @given('config')
 def step_impl_given_config(context):
     tests.setup(context, json.loads(context.text))
-    tests.setup_auth_user(context)
+    setup_auth_user(context)
 
 
 @given('we have "{role_name}" role')
@@ -296,22 +313,51 @@ def step_impl_fetch_from_provider_ingest(context, provider_name, guid):
         fetch_from_provider(context, provider_name, guid)
 
 
+def embed_routing_scheme_rules(scheme):
+    """Fetch all content filters referenced by the given routing scheme and
+    embed them into the latter (replacing the plain references to filters).
+
+    :param dict scheme: routing scheme configuration
+    """
+    filters_service = superdesk.get_resource_service('content_filters')
+
+    rules_filters = (
+        (rule, str(rule['filter']))
+        for rule in scheme['rules'] if rule.get('filter'))
+
+    for rule, filter_id in rules_filters:
+        content_filter = filters_service.find_one(_id=filter_id, req=None)
+        rule['filter'] = content_filter
+
+
 @when('we fetch from "{provider_name}" ingest "{guid}" using routing_scheme')
 def step_impl_fetch_from_provider_ingest_using_routing(context, provider_name, guid):
     with context.app.test_request_context(context.app.config['URL_PREFIX']):
         _id = apply_placeholders(context, context.text)
         routing_scheme = get_resource_service('routing_schemes').find_one(_id=_id, req=None)
+        embed_routing_scheme_rules(routing_scheme)
         fetch_from_provider(context, provider_name, guid, routing_scheme)
 
 
-def fetch_from_provider(context, provider_name, guid, routing_scheme=None):
+@when('we ingest and fetch "{provider_name}" "{guid}" to desk "{desk}" stage "{stage}" using routing_scheme')
+def step_impl_fetch_from_provider_ingest_using_routing_with_desk(context, provider_name, guid, desk, stage):
+    with context.app.test_request_context(context.app.config['URL_PREFIX']):
+        _id = apply_placeholders(context, context.text)
+        desk_id = apply_placeholders(context, desk)
+        stage_id = apply_placeholders(context, stage)
+        routing_scheme = get_resource_service('routing_schemes').find_one(_id=_id, req=None)
+        embed_routing_scheme_rules(routing_scheme)
+        fetch_from_provider(context, provider_name, guid, routing_scheme, desk_id, stage_id)
+
+
+def fetch_from_provider(context, provider_name, guid, routing_scheme=None, desk_id=None, stage_id=None):
     ingest_provider_service = get_resource_service('ingest_providers')
     provider = ingest_provider_service.find_one(name=provider_name, req=None)
     provider['routing_scheme'] = routing_scheme
     provider_service = context.provider_services[provider.get('type')]
     provider_service.provider = provider
 
-    if provider.get('type') == 'aap' or provider.get('type') == 'teletype':
+    if provider.get('type') in ('aap', 'teletype', 'dpa'):
         items = provider_service.parse_file(guid, provider)
     else:
         items = provider_service.fetch_ingest(guid)
@@ -319,6 +365,10 @@ def fetch_from_provider(context, provider_name, guid, routing_scheme=None):
     for item in items:
         item['versioncreated'] = utcnow()
         item['expiry'] = utcnow() + timedelta(minutes=20)
+
+        if desk_id:
+            from bson.objectid import ObjectId
+            item['task'] = {'desk': ObjectId(desk_id), 'stage': ObjectId(stage_id)}
 
     failed = context.ingest_items(items, provider, rule_set=provider.get('rule_set'),
                                   routing_scheme=provider.get('routing_scheme'))
@@ -411,7 +461,7 @@ def step_impl_when_put_url(context, url):
 
 @when('we get "{url}"')
 def when_we_get_url(context, url):
-    url = apply_placeholders(context, url)
+    url = apply_placeholders(context, url).encode('ascii').decode('unicode-escape')
     headers = []
     if context.text:
         for line in context.text.split('\n'):
@@ -663,6 +713,93 @@ def step_impl_then_get_list(context, total_count):
         test_json(context)
 
 
+@then('we get "{value}" in formatted output')
+def step_impl_then_get_formatted_output(context, value):
+    assert_200(context.response)
+    value = apply_placeholders(context, value)
+    data = get_json_data(context.response)
+    for item in data['_items']:
+        if value in item['formatted_item']:
+            return
+    assert False
+
+
+@then('we get "{value}" in formatted output as "{group}" story for subscriber "{sub}"')
+def step_impl_then_get_formatted_output(context, value, group, sub):
+    assert_200(context.response)
+    value = apply_placeholders(context, value)
+    data = get_json_data(context.response)
+    for item in data['_items']:
+        if item['subscriber_id'] != sub:
+            continue
+
+        try:
+            formatted_data = json.loads(item['formatted_item'])
+        except:
+            continue
+
+        for group_item in formatted_data.get('associations', {}).get(group, []):
+            if group_item.get('_id', '') == value:
+                return
+    assert False
+
+
+@then('we get "{value}" as "{group}" story for subscriber "{sub}" in package "{pck}"')
+def step_impl_then_get_formatted_output_pck(context, value, group, sub, pck):
+    assert_200(context.response)
+    value = apply_placeholders(context, value)
+    data = get_json_data(context.response)
+    for item in data['_items']:
+        if item['item_id'] != pck:
+            continue
+
+        if item['subscriber_id'] != sub:
+            continue
+
+        try:
+            formatted_data = json.loads(item['formatted_item'])
+        except:
+            continue
+
+        for group_item in formatted_data.get('associations', {}).get(group, []):
+            if group_item.get('_id', '') == value:
+                return
+    assert False
+
+
+@then('we get "{value}" as "{group}" story for subscriber "{sub}" not in package "{pck}" version "{v}"')
+def step_impl_then_get_formatted_output_pck(context, value, group, sub, pck, v):
+    assert_200(context.response)
+    value = apply_placeholders(context, value)
+    data = get_json_data(context.response)
+    for item in data['_items']:
+        if item['item_id'] == pck:
+            if item['subscriber_id'] == sub and str(item['item_version']) == v:
+                try:
+                    formatted_data = json.loads(item['formatted_item'])
+                except:
+                    continue
+
+                for group_item in formatted_data.get('associations', {}).get(group, []):
+                    if group_item.get('_id', '') == value:
+                        assert False
+
+                assert True
+                return
+    assert False
+
+
+@then('we get "{value}" in formatted output as "{group}" newsml12 story')
+def step_impl_then_get_formatted_output_newsml(context, value, group):
+    assert_200(context.response)
+    value = apply_placeholders(context, value)
+    data = get_json_data(context.response)
+    for item in data['_items']:
+        if '<' + group + '>' + value + '</' + group + '>' in item['formatted_item']:
+            return
+    assert False
+
+
 @then('we get no "{field}"')
 def step_impl_then_get_nofield(context, field):
     assert_200(context.response)
@@ -836,6 +973,7 @@ def step_impl_then_get_rendition_with_mimetype(context, name, mimetype):
     assert isinstance(desc, dict), 'expected dict for rendition description'
     assert 'href' in desc, 'expected href in rendition description'
     we_can_fetch_a_file(context, desc['href'], mimetype)
+    set_placeholder(context, "rendition.{}.href".format(name), desc['href'])
 
 
 @when('we get updated media from archive')
@@ -895,7 +1033,7 @@ def step_impl_then_get_file(context):
     assert len(response.get_data()), response
     assert response.mimetype == 'application/json', response.mimetype
     expect_json_contains(response, 'renditions')
-    expect_json_contains(response, {'mime_type': 'image/jpeg'})
+    expect_json_contains(response, {'mimetype': 'image/jpeg'})
     fetched_data = get_json_data(context.response)
     context.fetched_data = fetched_data
 
@@ -908,6 +1046,14 @@ def step_impl_then_get_cropped_file(context, max_size):
 @then('we can fetch a data_uri')
 def step_impl_we_fetch_data_uri(context):
     we_can_fetch_a_file(context, context.fetched_data['renditions']['original']['href'], 'image/jpeg')
+
+
+@then('we fetch a file "{url}"')
+def step_impl_we_cannot_fetch_file(context, url):
+    url = apply_placeholders(context, url)
+    headers = [('Accept', 'application/json')]
+    headers = unique_headers(headers, context.headers)
+    context.response = context.client.get(get_prefixed_url(context.app, url), headers=headers)
 
 
 def we_can_fetch_a_file(context, url, mimetype):
@@ -1089,13 +1235,13 @@ def we_reset_password_for_user(context):
 def when_we_switch_user(context):
     user = {'username': 'test-user-2', 'password': 'pwd', 'is_active': True,
             'needs_activation': False, 'sign_off': 'foo'}
-    tests.setup_auth_user(context, user)
+    setup_auth_user(context, user)
     set_placeholder(context, 'USERS_ID', str(context.user['_id']))
 
 
 @when('we setup test user')
 def when_we_setup_test_user(context):
-    tests.setup_auth_user(context, test_user)
+    setup_auth_user(context, test_user)
 
 
 @when('we get my "{url}"')
@@ -1165,6 +1311,7 @@ def step_impl_when_spike_fetched_item(context):
 
 @when('we unspike "{item_id}"')
 def step_impl_when_unspike_url(context, item_id):
+    item_id = apply_placeholders(context, item_id)
     res = get_res('/archive/' + item_id, context)
     headers = if_match(context, res.get('_etag'))
     context.response = context.client.patch(get_prefixed_url(context.app, '/archive/unspike/' + item_id),
@@ -1215,7 +1362,7 @@ def get_content_expiry(context, minutes):
 def get_desk_spike_expiry(context, test_minutes):
     response_data = json.loads(context.response.get_data())
     assert response_data['expiry']
-    response_expiry = datetime.strptime(response_data['expiry'], "%Y-%m-%dT%H:%M:%S%z")
+    response_expiry = parse_date(response_data['expiry'])
     expiry = utc.utcnow() + timedelta(minutes=int(test_minutes))
     assert response_expiry <= expiry
 
@@ -1343,24 +1490,24 @@ def then_we_get_activity(context):
             set_placeholder(context, 'USERS_ID', item['user'])
 
 
-def login_as(context, username, password):
+def login_as(context, username, password, user_type):
     user = {'username': username, 'password': password, 'is_active': True,
-            'is_enabled': True, 'needs_activation': False}
+            'is_enabled': True, 'needs_activation': False, user_type: user_type}
 
     if context.text:
         user.update(json.loads(context.text))
 
-    tests.setup_auth_user(context, user)
+    setup_auth_user(context, user)
 
 
-@given('we login as user "{username}" with password "{password}"')
-def given_we_login_as_user(context, username, password):
-    login_as(context, username, password)
+@given('we login as user "{username}" with password "{password}" and user type "{user_type}"')
+def given_we_login_as_user(context, username, password, user_type):
+    login_as(context, username, password, user_type)
 
 
-@when('we login as user "{username}" with password "{password}"')
-def when_we_login_as_user(context, username, password):
-    login_as(context, username, password)
+@when('we login as user "{username}" with password "{password}" and user type "{user_type}"')
+def when_we_login_as_user(context, username, password, user_type):
+    login_as(context, username, password, user_type)
 
 
 def is_user_resource(resource):
@@ -1395,13 +1542,44 @@ def then_field_is_populated(context, field_name):
     assert resp[field_name].get('user', None) is not None, 'item is not populated'
 
 
-@when('we delete publish filter "{name}"')
-def step_delete_publish_filter(context, name):
+@then('we get "{field_name}" not populated')
+def then_field_is_not_populated(context, field_name):
+    resp = parse_json_response(context.response)
+    assert resp[field_name] is None, 'item is not populated'
+
+
+@then('we get "{field_name}" not populated in results')
+def then_field_is_not_populated(context, field_name):
+    resps = parse_json_response(context.response)
+    for resp in resps['_items']:
+        assert resp[field_name] is None, 'item is not populated'
+
+
+@when('we delete content filter "{name}"')
+def step_delete_content_filter(context, name):
     with context.app.test_request_context(context.app.config['URL_PREFIX']):
-        filter = get_resource_service('publish_filters').find_one(req=None, name=name)
-        url = '/publish_filters/{}'.format(filter['_id'])
+        filter = get_resource_service('content_filters').find_one(req=None, name=name)
+        url = '/content_filters/{}'.format(filter['_id'])
         headers = if_match(context, filter.get('_etag'))
         context.response = context.client.delete(get_prefixed_url(context.app, url), headers=headers)
+
+
+@when('we rewrite "{item_id}"')
+def step_impl_when_rewrite(context, item_id):
+    context_data = {}
+    _id = apply_placeholders(context, item_id)
+    if context.text:
+        context_data.update(json.loads(apply_placeholders(context, context.text)))
+    data = json.dumps(context_data)
+    context.response = context.client.post(
+        get_prefixed_url(context.app, '/archive/{}/rewrite'.format(_id)),
+        data=data, headers=context.headers)
+    if context.response.status_code == 400:
+        return
+
+    resp = parse_json_response(context.response)
+    set_placeholder(context, 'REWRITE_OF', _id)
+    set_placeholder(context, 'REWRITE_ID', resp['_id']['_id'])
 
 
 @when('we publish "{item_id}" with "{pub_type}" type and "{state}" state')
@@ -1411,7 +1589,8 @@ def step_impl_when_publish_url(context, item_id, pub_type, state):
     headers = if_match(context, res.get('_etag'))
     context_data = {"state": state}
     if context.text:
-        context_data.update(json.loads(context.text))
+        data = apply_placeholders(context, context.text)
+        context_data.update(json.loads(data))
     data = json.dumps(context_data)
     context.response = context.client.patch(get_prefixed_url(context.app, '/archive/{}/{}'.format(pub_type, item_id)),
                                             data=data, headers=headers)
@@ -1420,6 +1599,19 @@ def step_impl_when_publish_url(context, item_id, pub_type, state):
     if linked_packages:
         take_package = linked_packages[0].get('package', '')
         set_placeholder(context, 'archive.{}.take_package'.format(item_id), take_package)
+
+
+@when('we get digital item of "{item_id}"')
+def step_impl_when_we_get_digital(context, item_id):
+    item_id = apply_placeholders(context, item_id)
+    context.response = context.client.get(get_prefixed_url(context.app, '/archive/{}'.format(item_id)),
+                                          headers=context.headers)
+    resp = parse_json_response(context.response)
+    linked_packages = resp.get('linked_in_packages', [])
+    for lp in linked_packages:
+        if lp.get('package_type', '') == 'takes':
+            take_package = lp.get('package', '')
+            set_placeholder(context, 'archive.{}.take_package'.format(item_id), take_package)
 
 
 @then('the ingest item is routed based on routing scheme and rule "{rule_name}"')
@@ -1484,17 +1676,23 @@ def when_we_schedule_the_routing_scheme(context, scheme_id):
         href = get_self_href(res, context)
         headers = if_match(context, res.get('_etag'))
         rule = res.get('rules')[0]
-        day_of_week = get_resource_service('routing_schemes').day_of_week
+        now = utcnow()
+        from apps.rules.routing_rules import Weekdays
+
         rule['schedule'] = {
-            'day_of_week': [day_of_week[(datetime.now() + timedelta(days=1)).weekday()],
-                            day_of_week[(datetime.now() + timedelta(days=2)).weekday()]],
+            'day_of_week': [
+                Weekdays.dayname(now + timedelta(days=1)),
+                Weekdays.dayname(now + timedelta(days=2))
+            ],
             'hour_of_day_from': '1600',
             'hour_of_day_to': '2000'
         }
-        rule = res.get('rules')[1]
-        rule['schedule'] = {
-            'day_of_week': [day_of_week[datetime.now().weekday()]]
-        }
+
+        if len(res.get('rules')) > 1:
+            rule = res.get('rules')[1]
+            rule['schedule'] = {
+                'day_of_week': [Weekdays.dayname(now)]
+            }
 
         context.response = context.client.patch(get_prefixed_url(context.app, href),
                                                 data=json.dumps({'rules': res.get('rules', [])}),
@@ -1553,7 +1751,80 @@ def there_is_no_key_in_response(context, key):
     assert key not in data, 'key "%s" is in %s' % (key, data)
 
 
+@then('there is no "{key}" in task')
+def there_is_no_key_in_preferences(context, key):
+    data = get_json_data(context.response)['task']
+    assert key not in data, 'key "%s" is in task' % key
+
+
 @then('there is no "{key}" in "{namespace}" preferences')
 def there_is_no_key_in_preferences(context, key, namespace):
     data = get_json_data(context.response)['user_preferences']
     assert key not in data[namespace], 'key "%s" is in %s' % (key, data[namespace])
+
+
+@then('we check if article has Embargo and Ed. Note of the article has embargo indication')
+def step_impl_then_check_embargo(context):
+    assert_200(context.response)
+    try:
+        response_data = json.loads(context.response.get_data())
+    except Exception:
+        fail_and_print_body(context.response, 'response is not valid json')
+
+    if response_data.get('_meta') and response_data.get('_items'):
+        for item in response_data.get('_items'):
+            assert_embargo(context, item)
+    else:
+        assert_embargo(context, response_data)
+
+
+def assert_embargo(context, item):
+    if not item.get('embargo'):
+        fail_and_print_body(context, context.response, 'Embargo not found')
+
+    if not item.get('ednote'):
+        fail_and_print_body(context, context.response, 'Embargo indication in "Ed. Note" not found')
+
+    assert_equal((item['ednote'].find('Embargoed') > -1), True)
+
+
+@when('embargo lapses for "{item_id}"')
+def embargo_lapses(context, item_id):
+    item_id = apply_placeholders(context, item_id)
+    item = get_res("/archive/%s" % item_id, context)
+
+    updates = {'embargo': (utcnow() - timedelta(minutes=1))}
+    with context.app.test_request_context(context.app.config['URL_PREFIX']):
+        get_resource_service('archive').system_update(id=item['_id'], original=item, updates=updates)
+
+
+@then('we validate the published item expiry to be after publish expiry set in desk settings {publish_expiry_in_desk}')
+def validate_published_item_expiry(context, publish_expiry_in_desk):
+    assert_200(context.response)
+    try:
+        response_data = json.loads(context.response.get_data())
+    except Exception:
+        fail_and_print_body(context.response, 'response is not valid json')
+
+    if response_data.get('_meta') and response_data.get('_items'):
+        for item in response_data.get('_items'):
+            assert_expiry(context, item, publish_expiry_in_desk)
+    else:
+        assert_expiry(context, response_data, publish_expiry_in_desk)
+
+
+def assert_expiry(context, item, publish_expiry_in_desk):
+    embargo = item.get('embargo')
+    actual = parse_date(item.get('expiry'))
+    error_message = 'Published Item Expiry validation fails'
+    publish_expiry_in_desk = int(publish_expiry_in_desk)
+
+    if embargo:
+        expected = get_expiry_date(minutes=publish_expiry_in_desk,
+                                   offset=datetime.strptime(embargo, '%Y-%m-%dT%H:%M:%S%z'))
+        if actual != expected:
+            raise WooperAssertionError("{}. Expected: {}, Actual: {}".format(error_message, expected, actual))
+    else:
+        expected = get_expiry_date(minutes=publish_expiry_in_desk)
+        if expected < actual:
+            raise WooperAssertionError("{}. Expected: {}, Actual: {}".format(error_message, expected, actual))

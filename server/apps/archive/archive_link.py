@@ -11,9 +11,12 @@
 from flask import request
 
 from superdesk import get_resource_service, Service
+from superdesk.metadata.item import EMBARGO
 from superdesk.resource import Resource, build_custom_hateoas
 from apps.packages import TakesPackageService
-from apps.archive.common import item_url, CUSTOM_HATEOAS
+from apps.archive.common import CUSTOM_HATEOAS
+from apps.auth import get_user
+from superdesk.metadata.utils import item_url
 from apps.archive.archive import SOURCE as ARCHIVE
 from superdesk.errors import SuperdeskApiError
 import logging
@@ -46,11 +49,18 @@ class ArchiveLinkService(Service):
         desk_id = doc.get('desk')
         service = get_resource_service(ARCHIVE)
         target = service.find_one(req=None, _id=target_id)
+        self._validate_link(target, target_id)
+        link = {}
 
-        link = {'task': {'desk': desk_id}} if desk_id else {}
+        if desk_id:
+            link = {'task': {'desk': desk_id}}
+            user = get_user()
+            lookup = {'_id': desk_id, 'members.user': user['_id']}
+            desk = get_resource_service('desks').find_one(req=None, **lookup)
+            if not desk:
+                raise SuperdeskApiError.forbiddenError("No privileges to create new take on requested desk.")
 
-        if not target:
-            raise SuperdeskApiError.notFoundError(message='Cannot find the target item with id {}.'.format(target_id))
+            link['task']['stage'] = desk['incoming_stage']
 
         if link_id:
             link = service.find_one(req=None, _id=link_id)
@@ -59,3 +69,19 @@ class ArchiveLinkService(Service):
         doc.update(linked_item)
         build_custom_hateoas(CUSTOM_HATEOAS, doc)
         return [linked_item['_id']]
+
+    def _validate_link(self, target, target_id):
+        """
+        Validates the article to be linked
+        :param target: article to be linked
+        :param target_id: id of the article to be linked
+        :raises: SuperdeskApiError
+        """
+        if not target:
+            raise SuperdeskApiError.notFoundError(message='Cannot find the target item with id {}.'.format(target_id))
+
+        if target.get(EMBARGO):
+            raise SuperdeskApiError.badRequestError("Takes can't be created for an Item having Embargo")
+
+        if get_resource_service('published').is_rewritten_before(target['_id']):
+            raise SuperdeskApiError.badRequestError(message='Article has been rewritten before !')

@@ -16,7 +16,7 @@ from superdesk.utc import utcnow
 from superdesk.notification import push_notification
 from apps.common.components.base_component import BaseComponent
 from apps.common.models.utils import get_model
-from apps.users.services import current_user_has_privilege
+from superdesk.users.services import current_user_has_privilege
 import superdesk
 
 LOCK_USER = 'lock_user'
@@ -81,7 +81,7 @@ class ItemLock(BaseComponent):
 
             # delete the item if nothing is saved so far
             # version 0 created on lock item
-            if item[config.VERSION] == 0 and item['state'] == 'draft':
+            if item.get(config.VERSION, 0) == 0 and item['state'] == 'draft':
                 superdesk.get_resource_service('archive').delete(lookup={'_id': item['_id']})
                 return
 

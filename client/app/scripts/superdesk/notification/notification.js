@@ -10,8 +10,12 @@
 (function() {
     'use strict';
 
-    WebSocketProxy.$inject = ['$rootScope', 'config', 'desks'];
-    function WebSocketProxy($rootScope, config, desks, session) {
+    WebSocketProxy.$inject = ['$rootScope', 'config', '$interval'];
+    function WebSocketProxy($rootScope, config, $interval) {
+
+        var ws = null;
+        var connectTimer = -1;
+        var TIMEOUT = 5500;
 
         var ReloadEvents = [
             'user_disabled',
@@ -30,19 +34,66 @@
             return;
         }
 
-        var ws = new WebSocket(config.server.ws);
-
-        ws.onmessage = function(event) {
-            var msg = angular.fromJson(event.data);
-            $rootScope.$broadcast(msg.event, msg.extra);
-            if (_.contains(ReloadEvents, msg.event)) {
-                $rootScope.$broadcast('reload', msg);
-            }
+        var connect = function() {
+            ws = new WebSocket(config.server.ws);
+            bindEvents();
         };
 
-        ws.onerror = function(event) {
-            console.error(event);
+        var bindEvents = function() {
+            ws.onmessage = function(event) {
+                var msg = angular.fromJson(event.data);
+                $rootScope.$broadcast(msg.event, msg.extra);
+                if (_.contains(ReloadEvents, msg.event)) {
+                    $rootScope.$broadcast('reload', msg);
+                }
+            };
+
+            ws.onerror = function(event) {
+                console.error(event);
+            };
+
+            ws.onopen = function(event) {
+                $interval.cancel(connectTimer);
+                $rootScope.$broadcast('connected');
+            };
+
+            ws.onclose = function(event) {
+                $rootScope.$broadcast('disconnected');
+                $interval.cancel(connectTimer);
+                connectTimer = $interval(function() {
+                    if (ws) {
+                        connect();  // Retry to connect for every TIMEOUT interval.
+                    }
+                }, TIMEOUT, 0, false);  // passed invokeApply = false to prevent triggering digest cycle
+            };
         };
+
+        connect();
+    }
+
+    /**
+     * Service for notifying user when websocket connection disconnected or connected.
+     */
+    NotifyConnectionService.$inject = ['$rootScope', 'notify', 'gettext', '$timeout'];
+    function NotifyConnectionService($rootScope, notify, gettext, $timeout) {
+        var successTimeout, alertTimeout;
+        var _this = this;
+        _this.message = null;
+
+        $rootScope.$on('disconnected', function(event) {
+            _this.message = 'Disconnected to Notification Server, attempting to reconnect ...';
+            $timeout.cancel(alertTimeout);
+            alertTimeout = $timeout(function() {
+                notify.error(gettext(_this.message));
+            }, 100);
+        });
+        $rootScope.$on('connected', function(event) {
+            _this.message = 'Connected to Notification Server!';
+            $timeout.cancel(successTimeout);
+            successTimeout = $timeout(function() {
+                notify.success(gettext(_this.message));
+            }, 100);
+        });
     }
 
     ReloadService.$inject = ['$window', '$rootScope', 'session', 'desks', 'gettext'];
@@ -50,9 +101,12 @@
         var _this = this;
         _this.userDesks = [];
         _this.result = null;
+        _this.activeDesk = null;
         desks.fetchCurrentUserDesks().then(function (desk_list) {
             _this.userDesks = desk_list._items;
+            _this.activeDesk = desks.active.desk;
         });
+
         var userEvents = {
             'user_disabled': 'User is disabled',
             'user_inactivated': 'User is inactivated',
@@ -129,7 +183,7 @@
                             result.reload = true;
                         }
                     } else if (msg.event === 'stage') {
-                        if (_.find(_this.userDesks, {_id: msg.extra.desk_id}) != null) {
+                        if (_.find(_this.userDesks, {_id: msg.extra.desk_id}) != null && _this.activeDesk === msg.extra.desk_id) {
                             result.message = stageEvents[msg.event];
                             result.reload = true;
                         }
@@ -142,5 +196,6 @@
 
     return angular.module('superdesk.notification', ['superdesk.desks'])
         .service('reloadService', ReloadService)
+        .service('notifyConnectionService', NotifyConnectionService)
         .run(WebSocketProxy);
 })();

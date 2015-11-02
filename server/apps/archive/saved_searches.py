@@ -45,6 +45,14 @@ class SavedSearchesResource(Resource):
     privileges = {'POST': 'saved_searches', 'DELETE': 'saved_searches'}
 
 
+class AllSavedSearchesResource(Resource):
+    endpoint_name = resource_title = 'all_saved_searches'
+    datasource = {'source': 'saved_searches'}
+    resource_methods = ['GET']
+    item_methods = []
+    schema = SavedSearchesResource.schema
+
+
 class SavedSearchesService(BaseService):
     def on_create(self, docs):
         for doc in docs:

@@ -4,7 +4,7 @@ describe('workspace', function() {
 
     var DESK = 1;
 
-    beforeEach(module('templates'));
+    beforeEach(module('superdesk.templates-cache'));
     beforeEach(module('superdesk.dashboard'));
 
     beforeEach(inject(function(session) {
@@ -63,17 +63,16 @@ describe('workspace', function() {
 
         it('can set active desk',
         inject(function(workspaces, desks, api, preferencesService, $q, $rootScope) {
-            spyOn(api, 'query').and.returnValue($q.when({_items: [{_id: 'deskworkspace'}]}));
             spyOn(preferencesService, 'update');
 
             var desk = {_id: 'foo'};
+            desks.deskLookup = [];
+            desks.deskLookup.foo = desk;
             workspaces.setActiveDesk(desk);
             $rootScope.$digest();
 
-            expect(workspaces.active._id).toBe('deskworkspace');
-            expect(api.query).toHaveBeenCalledWith('workspaces', {where: {desk: 'foo'}});
             expect(preferencesService.update).toHaveBeenCalledWith(
-                {'workspace:active': {workspace: ''}},
+                {'workspace:active': {workspace: 'foo'}},
                 'workspace:active'
             );
         }));
@@ -81,28 +80,11 @@ describe('workspace', function() {
         it('can create workspace', inject(function(workspaces, session, api, $q, $rootScope) {
             spyOn(api, 'save').and.returnValue($q.when({_id: 'w1'}));
             session.testUser('foo');
-            var created = jasmine.createSpy('created');
-            workspaces.create().then(created);
-            expect(workspaces.edited.user).toBe('foo');
+            var workspace = {name: 'test'};
+            workspaces.save(workspace);
             $rootScope.$digest();
-            expect(created).not.toHaveBeenCalled();
-            workspaces.edited.name = 'test';
-
-            workspaces.save();
-            $rootScope.$digest();
-            expect(created).toHaveBeenCalled();
-            expect(workspaces.edited).toBe(null);
             expect(workspaces.active._id).toBe('w1');
             expect(api.save).toHaveBeenCalledWith('workspaces', {user: 'foo', name: 'test'});
-        }));
-
-        it('can cancel workspace editing', inject(function(workspaces, $rootScope) {
-            var canceled = jasmine.createSpy('canceled');
-            workspaces.create().then(null, canceled);
-            workspaces.cancelEdit();
-            $rootScope.$digest();
-            expect(canceled).toHaveBeenCalled();
-            expect(workspaces.edited).toBe(null);
         }));
 
         it('can use last active workspace',
@@ -118,8 +100,10 @@ describe('workspace', function() {
 
         it('can create desk workspace if desk is selected but no workspace',
         inject(function(workspaces, desks, api, preferencesService, $q, $rootScope) {
-            spyOn(preferencesService, 'get').and.returnValue($q.when(null));
+            spyOn(preferencesService, 'get').and.returnValue($q.when({workspace: DESK}));
             spyOn(api, 'query').and.returnValue($q.when({_items: []}));
+            desks.deskLookup = [];
+            desks.deskLookup[DESK] = {_id: DESK};
             workspaces.getActive();
             $rootScope.$digest();
             expect(workspaces.active.desk).toBe(DESK);
@@ -139,5 +123,44 @@ describe('workspace', function() {
             expect(workspaces.active.desk).toBe(undefined);
             expect(workspaces.active.user).toBe('foo');
         }));
+    });
+    describe('sdDeskDropdown directive', function() {
+        var scope, workspaces;
+
+        beforeEach(inject(function (desks, _workspaces_, api, preferencesService, $q, $rootScope, $compile) {
+            workspaces = _workspaces_;
+            spyOn(desks, 'setCurrentDeskId');
+            spyOn(workspaces, 'setActive');
+            spyOn(preferencesService, 'update');
+            desks.deskLookup = [];
+            desks.deskLookup.foo = {_id: 'foo'};
+            spyOn(preferencesService, 'get').and.returnValue($q.when({workspace: 'foo'}));
+            spyOn(api, 'query').and.returnValue($q.when({_items: []}));
+
+            scope = $rootScope.$new();
+            $compile('<div sd-desk-dropdown></div>')(scope);
+            scope.$digest();
+        }));
+
+        describe('selectDesk() scope method', function() {
+            it('can set workspace type', inject(function () {
+                var desk = {_id: 'foo'};
+                scope.workspaceType = null;
+                scope.selectDesk(desk);
+
+                expect(scope.workspaceType).toEqual('desk');
+            }));
+        });
+
+        describe('selectWorkspace() scope method', function() {
+            it('can set workspace type', inject(function () {
+                var workspace = {name: 'foo', widgets: [{_id: 'foo'}]};
+
+                scope.workspaceType = null;
+                scope.selectWorkspace(workspace);
+
+                expect(scope.workspaceType).toEqual('workspace');
+            }));
+        });
     });
 });

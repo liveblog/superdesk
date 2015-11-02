@@ -19,7 +19,7 @@
                 "type": "string",
                 "required": "true",
                 "allowed": [
-                    "X"
+                    "text"
                 ]
             },
             "anpa_category": {
@@ -51,6 +51,19 @@
                 "type": "integer",
                 "required": true,
                 "allowed": [1, 2, 3, 4, 5]
+            },
+            "priority": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            },
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
             }
         }
     },
@@ -74,7 +87,7 @@
                 "type": "string",
                 "required": "true",
                 "allowed": [
-                    "T"
+                    "preformatted"
                 ]
             },
             "anpa_category": {
@@ -106,6 +119,19 @@
                 "type": "integer",
                 "required": true,
                 "allowed": [1, 2, 3, 4, 5]
+            },
+            "priority": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            },
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
             }
         }
     },
@@ -113,19 +139,117 @@
         "_id": "publish_picture",
         "act": "publish",
         "type": "picture",
+        "schema": {
+            "renditions": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "4-3": {"type": "dict", "required": true},
+                    "16-9": {"type": "dict", "required": true}
+                }
+            }
+        }
+    },
+    {
+        "_id": "correct_picture",
+        "act": "correct",
+        "type": "picture",
+        "schema": {
+            "renditions": {
+                "type": "dict",
+                "required": false,
+                "schema": {
+                    "4-3": {"type": "dict", "required": false},
+                    "16-9": {"type": "dict", "required": false}
+                }
+            }
+        }
+    },
+    {
+        "_id": "kill_picture",
+        "act": "kill",
+        "type": "picture",
         "schema": {}
+    },
+    {
+        "_id": "correct_text",
+        "act": "correct",
+        "type": "text",
+        "schema": {
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
+            },
+            "urgency": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5]
+            },
+            "priority": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            }
+        }
+    },
+    {
+        "_id": "correct_preformatted",
+        "act": "correct",
+        "type": "preformatted",
+        "schema": {
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
+            },
+            "urgency": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5]
+            },
+            "priority": {
+                "type": "integer",
+                "required": true,
+                "allowed": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            }
+        }
     },
     {
         "_id": "kill_text",
         "act": "kill",
         "type": "text",
-        "schema": {}
+        "schema": {
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
+            }
+        }
     },
     {
-        "_id": "publish_correct",
-        "act": "correct",
-        "type": "text",
-        "schema": {}
+        "_id": "kill_preformatted",
+        "act": "kill",
+        "type": "preformatted",
+        "schema": {
+            "dateline": {
+                "type": "dict",
+                "required": true,
+                "schema": {
+                    "located": {"type": "dict", "required": true},
+                    "text": {"type": "string", "required": true}
+                }
+            }
+        }
     },
     {
         "_id": "publish_video",
@@ -137,6 +261,39 @@
         "_id": "publish_composite",
         "act": "publish",
         "type": "composite",
-        "schema": {}
+        "schema": {
+            "headline": {
+                "type": "string",
+                "required": true,
+                "minlength": 1,
+                "maxlength": 55
+            }
+        }
+    },
+    {
+        "_id": "correct_composite",
+        "act": "correct",
+        "type": "composite",
+        "schema": {
+            "headline": {
+                "type": "string",
+                "required": true,
+                "minlength": 1,
+                "maxlength": 55
+            }
+        }
+    },
+    {
+        "_id": "kill_composite",
+        "act": "kill",
+        "type": "composite",
+        "schema": {
+            "headline": {
+                "type": "string",
+                "required": true,
+                "minlength": 1,
+                "maxlength": 55
+            }
+        }
     }
 ]

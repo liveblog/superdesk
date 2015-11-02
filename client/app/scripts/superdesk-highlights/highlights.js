@@ -88,6 +88,16 @@
             return packages.createEmptyPackage(pkg_defaults, group);
         };
 
+        /**
+         * Get single highlight by its id
+         *
+         * @param {string} _id
+         * @return {Promise}
+         */
+        service.find = function(_id) {
+            return api.find('highlights', _id);
+        };
+
         return service;
     }
 
@@ -155,73 +165,49 @@
     function HighlightsTitleDirective(highlightsService, $timeout) {
         return {
             scope: {
-                item: '=item',
-                orientation: '=?'
+                item: '=item'
             },
             templateUrl: 'scripts/superdesk-highlights/views/highlights_title_directive.html',
             // todo(petr): refactor to use popover-template once angular-bootstrap 0.13 is out
             link: function(scope, elem) {
-                var unmarkBox = elem.find('.unmark').hide(),
-                    icon = elem.find('i'),
-                    isOpen,
-                    closeTimeout;
 
-                scope.orientation = scope.orientation || 'right';
+                /*
+                 * Toggle 'open' class on dropdown menu element
+                 * @param {string} isOpen
+                 */
+                scope.toggleClass = function (isOpen) {
+                    scope.open = isOpen;
+                };
 
-                scope.$watch('item.highlights', function(_ids) {
-                    if (_ids) {
+                scope.$watch('item.highlights', function(items) {
+                    if (items) {
                         highlightsService.get().then(function(result) {
                             scope.highlights = _.filter(result._items, function(highlight) {
-                                return _ids.indexOf(highlight._id) >= 0;
-                            });
-                            // it has to first update the template before we use its html
-                            scope.$applyAsync(function() {
-                                scope.htmlTooltip = unmarkBox.html();
+                                return items.indexOf(highlight._id) >= 0;
                             });
                         });
                     }
                 });
 
-                scope.openTooltip = function() {
-                    $timeout.cancel(closeTimeout);
-                    closeTimeout = null;
-                    if (!isOpen) {
-                        toggle();
-                        isOpen = true;
-                    }
-                };
-
-                scope.closeTooltip = function() {
-                    if (isOpen && !closeTimeout) {
-                        closeTimeout = $timeout(function() {
-                            toggle();
-                            isOpen = false;
-                        }, 100, false);
-                    }
-                };
-
-                function toggle() {
-                    $timeout(function() { // need to timeout because tooltip is not expecting $digest
-                        icon[0].dispatchEvent(new CustomEvent('toggle'));
-                    }, 0, false);
-                }
-
-                // ng-click is not working because of tooltip
-                elem.on('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    var btn = e.target.nodeName === 'BUTTON' ? e.target : e.target.parentNode;
-                    var highlight = btn.attributes['data-highlight'];
-                    if (highlight) {
-                        unmarkHighlight(highlight.value);
+                elem.on({
+                    click: function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    },
+                    mouseenter: function () {
+                        $(this).find('.highlights-list').not('.open').children('.dropdown-toggle').click();
                     }
                 });
 
-                function unmarkHighlight(highlight) {
-                    highlightsService.mark_item(highlight, scope.item._id).then(function() {
+                /*
+                 * Removing highlight from an item
+                 * @param {string} highlight
+                 */
+                scope.unmarkHighlight = function (highlight) {
+                    highlightsService.markItem(highlight, scope.item._id).then(function() {
                         scope.item.highlights = _.without(scope.item.highlights, highlight);
                     });
-                }
+                };
             }
         };
     }
@@ -250,23 +236,57 @@
         };
     }
 
-    PackageHighlightsDropdownDirective.$inject = ['superdesk', 'desks', 'highlightsService'];
-    function PackageHighlightsDropdownDirective(superdesk, desks, highlightsService) {
+    PackageHighlightsDropdownDirective.$inject = ['desks', 'highlightsService', '$location', '$route'];
+    function PackageHighlightsDropdownDirective(desks, highlightsService, $location, $route) {
         return {
+            scope: true,
             templateUrl: 'scripts/superdesk-highlights/views/package_highlights_dropdown_directive.html',
             link: function(scope) {
-
-                scope.createHighlight = function(highlight) {
-                    highlightsService.createEmptyHighlight(highlight)
-                    .then(function(new_package) {
-                        superdesk.intent('author', 'package', new_package);
+                scope.$watch(function() {
+                    return desks.active;
+                }, function(active) {
+                    scope.selected = active;
+                    highlightsService.get(active.desk).then(function(result) {
+                        scope.highlights = result._items;
+                        scope.hasHighlights = _.size(scope.highlights) > 0;
                     });
-                };
-
-                highlightsService.get(desks.getCurrentDeskId()).then(function(result) {
-                    scope.highlights = result._items;
-                    scope.hasHighlights = _.size(scope.highlights) > 0;
                 });
+
+                scope.listHighlight = function(highlight) {
+                    $location.url('workspace/highlights?highlight=' + highlight._id);
+                    $route.reload();
+                };
+            }
+        };
+    }
+
+    HighlightLabelDirective.$inject = ['desks', 'highlightsService'];
+    function HighlightLabelDirective(desks, highlightsService) {
+        return {
+            scope: {highlight_id: '=highlight'},
+            template: '<span translate>{{ highlightItem.name }}</span>',
+            link: function(scope) {
+                highlightsService.get(desks.getCurrentDeskId()).then(function(result) {
+                    scope.highlightItem =  _.find(result._items, {_id: scope.highlight_id});
+                });
+            }
+        };
+    }
+
+    CreateHighlightsButtonDirective.$inject = ['highlightsService', 'authoringWorkspace'];
+    function CreateHighlightsButtonDirective(highlightsService, authoringWorkspace) {
+        return {
+            scope: {highlight_id: '=highlight'},
+            templateUrl: 'scripts/superdesk-highlights/views/create_highlights_button_directive.html',
+            link: function(scope) {
+                /**
+                 * Create new highlight package for current highlight and start editing it
+                 */
+                scope.createHighlight = function() {
+                    highlightsService.find(scope.highlight_id)
+                        .then(highlightsService.createEmptyHighlight)
+                        .then(authoringWorkspace.edit);
+                };
             }
         };
     }
@@ -428,6 +448,7 @@
 
     app
     .service('highlightsService', HighlightsService)
+    .directive('sdCreateHighlightsButton', CreateHighlightsButtonDirective)
     .directive('sdMarkHighlightsDropdown', MarkHighlightsDropdownDirective)
     .directive('sdMultiMarkHighlightsDropdown', MultiMarkHighlightsDropdownDirective)
     .directive('sdPackageHighlightsDropdown', PackageHighlightsDropdownDirective)
@@ -447,10 +468,11 @@
             }
         };
     })
+    .directive('sdHighlightLabel', HighlightLabelDirective)
     .config(['superdeskProvider', function(superdesk) {
         superdesk
         .activity('mark.item', {
-            label: gettext('Mark item'),
+            label: gettext('Mark for highlight'),
             priority: 30,
             icon: 'list-plus',
             dropdown: true,
@@ -460,7 +482,8 @@
             ],
             additionalCondition:['authoring', 'item', function(authoring, item) {
                 return authoring.itemActions(item).mark_item;
-            }]
+            }],
+            group: 'packaging'
         })
         .activity('/settings/highlights', {
             label: gettext('Highlights'),
@@ -469,6 +492,13 @@
             category: superdesk.MENU_SETTINGS,
             priority: -800,
             privileges: {highlights: 1}
+        }).
+        activity('/workspace/highlights', {
+            label: gettext('Highlights View'),
+            priority: 100,
+            templateUrl: 'scripts/superdesk-monitoring/views/highlights-view.html',
+            topTemplateUrl: 'scripts/superdesk-dashboard/views/workspace-topnav.html',
+            sideTemplateUrl: 'scripts/superdesk-workspace/views/workspace-sidenav.html'
         });
     }])
     .config(['apiProvider', function(apiProvider) {

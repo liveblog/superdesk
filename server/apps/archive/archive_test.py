@@ -9,18 +9,21 @@
 # at https://www.sourcefabric.org/superdesk/license
 
 
-from superdesk.tests import TestCase
+from bson import ObjectId
+from test_factory import SuperdeskTestCase
 from eve.utils import date_to_str
 from superdesk.utc import get_expiry_date, utcnow
-from apps.archive.commands import RemoveExpiredSpikeContent
-from apps.archive import ArchiveService
+from apps.archive.commands import RemoveExpiredSpikeContent, get_overdue_scheduled_items
 from apps.archive.archive import SOURCE as ARCHIVE
-from nose.tools import assert_raises
 from superdesk.errors import SuperdeskApiError
-from datetime import datetime, timedelta
+from datetime import timedelta, datetime
+from pytz import timezone
+from apps.archive.common import validate_schedule, remove_media_files, \
+    format_dateline_to_locmmmddsrc, convert_task_attributes_to_objectId
+from settings import ORGANIZATION_NAME_ABBREVIATION
 
 
-class RemoveSpikedContentTestCase(TestCase):
+class RemoveSpikedContentTestCase(SuperdeskTestCase):
 
     articles = [{'guid': 'tag:localhost:2015:69b961ab-2816-4b8a-a584-a7b402fed4f9',
                  '_id': '1',
@@ -34,7 +37,6 @@ class RemoveSpikedContentTestCase(TestCase):
                  'firstcreated': utcnow(),
                  'byline': 'By Alan Karben',
                  'ednote': 'Andrew Marwood contributed to this article',
-                 'dateline': 'Sydney',
                  'keywords': ['Student', 'Crime', 'Police', 'Missing'],
                  'subject':[{'qcode': '17004000', 'name': 'Statistics'},
                             {'qcode': '04001002', 'name': 'Weather'}],
@@ -52,7 +54,6 @@ class RemoveSpikedContentTestCase(TestCase):
                  'firstcreated': utcnow(),
                  'byline': 'By Alan Karben',
                  'ednote': 'Andrew Marwood contributed to this article',
-                 'dateline': 'Sydney',
                  'keywords': ['Student', 'Crime', 'Police', 'Missing'],
                  'subject':[{'qcode': '17004000', 'name': 'Statistics'},
                             {'qcode': '04001002', 'name': 'Weather'}],
@@ -70,7 +71,6 @@ class RemoveSpikedContentTestCase(TestCase):
                  'firstcreated': utcnow(),
                  'byline': 'By Alan Karben',
                  'ednote': 'Andrew Marwood contributed to this article killed',
-                 'dateline': 'Sydney',
                  'keywords': ['Student', 'Crime', 'Police', 'Missing'],
                  'subject':[{'qcode': '17004000', 'name': 'Statistics'},
                             {'qcode': '04001002', 'name': 'Weather'}],
@@ -136,6 +136,37 @@ class RemoveSpikedContentTestCase(TestCase):
                  'expiry': utcnow() + timedelta(minutes=20),
                  'unique_name': '#5'}]
 
+    media = {
+        'viewImage': {
+            'media': '1592730d582080f4e9fcc2fcf43aa357bda0ed19ffe314ee3248624cd4d4bc54',
+            'mimetype': 'image/jpeg',
+            'href': 'http://192.168.220.209/api/upload/abc/raw?_schema=http',
+            'height': 452,
+            'width': 640
+        },
+        'thumbnail': {
+            'media': '52250b4f37da50ee663fdbff057a5f064479f8a8bbd24fb8fdc06135d3f807bb',
+            'mimetype': 'image/jpeg',
+            'href': 'http://192.168.220.209/api/upload/abc/raw?_schema=http',
+            'height': 120,
+            'width': 169
+        },
+        'baseImage': {
+            'media': '7a608aa8f51432483918027dd06d0ef385b90702bfeba84ac4aec38ed1660b18',
+            'mimetype': 'image/jpeg',
+            'href': 'http://192.168.220.209/api/upload/abc/raw?_schema=http',
+            'height': 990,
+            'width': 1400
+        },
+        'original': {
+            'media': 'stub.jpeg',
+            'mimetype': 'image/jpeg',
+            'href': 'http://192.168.220.209/api/upload/stub.jpeg/raw?_schema=http',
+            'height': 2475,
+            'width': 3500
+        }
+    }
+
     def setUp(self):
         super().setUp()
 
@@ -150,24 +181,108 @@ class RemoveSpikedContentTestCase(TestCase):
             self.app.data.insert(ARCHIVE, [{'unique_id': 97, 'state': 'spiked'}])
 
             now = date_to_str(utcnow())
-            expiredItems = RemoveExpiredSpikeContent().get_expired_items(now)
-            self.assertEquals(2, expiredItems.count())
+            expired_items = RemoveExpiredSpikeContent().get_expired_items(now)
+            self.assertEquals(2, expired_items.count())
+
+    def test_query_removing_media_files_keeps(self):
+        with self.app.app_context():
+            self.app.data.insert(ARCHIVE, [{'state': 'spiked',
+                                            'expiry': get_expiry_date(-10),
+                                            'type': 'picture',
+                                            'renditions': self.media}])
+
+            self.app.data.insert('ingest', [{'type': 'picture', 'renditions': self.media}])
+            self.app.data.insert('archive_versions', [{'type': 'picture', 'renditions': self.media}])
+            self.app.data.insert('legal_archive', [{'_id': 1, 'type': 'picture', 'renditions': self.media}])
+            self.app.data.insert('legal_archive_versions', [{'_id': 1, 'type': 'picture', 'renditions': self.media}])
+
+            archive_items = self.app.data.find_all('archive', None)
+            self.assertEqual(archive_items.count(), 1)
+            deleted = remove_media_files(archive_items[0])
+            self.assertFalse(deleted)
+
+    def test_query_getting_overdue_scheduled_content(self):
+        with self.app.app_context():
+            self.app.data.insert(ARCHIVE, [{'publish_schedule': get_expiry_date(-10), 'state': 'published'}])
+            self.app.data.insert(ARCHIVE, [{'publish_schedule': get_expiry_date(-10), 'state': 'scheduled'}])
+            self.app.data.insert(ARCHIVE, [{'publish_schedule': get_expiry_date(0), 'state': 'spiked'}])
+            self.app.data.insert(ARCHIVE, [{'publish_schedule': get_expiry_date(10), 'state': 'scheduled'}])
+            self.app.data.insert(ARCHIVE, [{'unique_id': 97, 'state': 'spiked'}])
+
+            now = date_to_str(utcnow())
+            overdueItems = get_overdue_scheduled_items(now, 'archive')
+            self.assertEquals(1, overdueItems.count())
 
 
-class ArchiveTestCase(TestCase):
+class ArchiveTestCase(SuperdeskTestCase):
     def setUp(self):
         super().setUp()
 
     def test_validate_schedule(self):
-        date_without_time = datetime.strptime('Jun 1 2005', '%b %d %Y')
-        time_without_date = datetime.strptime('1:33PM', '%I:%M%p')
-        date_in_past = utcnow() + timedelta(hours=-2)
-        date_in_future = utcnow() + timedelta(hours=2)
+        validate_schedule(utcnow() + timedelta(hours=2))
 
-        ArchiveService().validate_schedule(date_in_future)
+    def test_validate_schedule_date_with_datetime_as_string_raises_superdeskApiError(self):
+        self.assertRaises(SuperdeskApiError, validate_schedule, "2015-04-27T10:53:48+00:00")
 
-        with assert_raises(SuperdeskApiError):
-            ArchiveService().validate_schedule("2015-04-27T10:53:48+00:00")
-            ArchiveService().validate_schedule(date_without_time)
-            ArchiveService().validate_schedule(time_without_date)
-            ArchiveService().validate_schedule(date_in_past)
+    def test_validate_schedule_date_with_datetime_in_past_raises_superdeskApiError(self):
+        self.assertRaises(SuperdeskApiError, validate_schedule, utcnow() + timedelta(hours=-2))
+
+    def _get_located_and_current_utc_ts(self):
+        current_ts = utcnow()
+        located = {"dateline": "city", "city_code": "Sydney", "state": "NSW", "city": "Sydney", "state_code": "NSW",
+                   "country_code": "AU", "tz": "Australia/Sydney", "country": "Australia"}
+
+        current_timestamp = datetime.fromtimestamp(current_ts.timestamp(), tz=timezone(located['tz']))
+        if current_timestamp.month == 9:
+            formatted_date = 'Sept {}'.format(current_timestamp.strftime('%d'))
+        elif 3 <= current_timestamp.month <= 7:
+            formatted_date = current_timestamp.strftime('%B %d')
+        else:
+            formatted_date = current_timestamp.strftime('%b %d')
+
+        return located, formatted_date, current_ts
+
+    def test_format_dateline_to_format_when_only_city_is_present(self):
+        located, formatted_date, current_ts = self._get_located_and_current_utc_ts()
+        formatted_dateline = format_dateline_to_locmmmddsrc(located, current_ts)
+        self.assertEqual(formatted_dateline, 'SYDNEY %s %s -' % (formatted_date, ORGANIZATION_NAME_ABBREVIATION))
+
+    def test_format_dateline_to_format_when_only_city_and_state_are_present(self):
+        located, formatted_date, current_ts = self._get_located_and_current_utc_ts()
+
+        located['dateline'] = "city,state"
+        formatted_dateline = format_dateline_to_locmmmddsrc(located, current_ts)
+        self.assertEqual(formatted_dateline, 'SYDNEY, NSW %s %s -' % (formatted_date, ORGANIZATION_NAME_ABBREVIATION))
+
+    def test_format_dateline_to_format_when_only_city_and_country_are_present(self):
+        located, formatted_date, current_ts = self._get_located_and_current_utc_ts()
+
+        located['dateline'] = "city,country"
+        formatted_dateline = format_dateline_to_locmmmddsrc(located, current_ts)
+        self.assertEqual(formatted_dateline, 'SYDNEY, AU %s %s -' % (formatted_date, ORGANIZATION_NAME_ABBREVIATION))
+
+    def test_format_dateline_to_format_when_city_state_and_country_are_present(self):
+        located, formatted_date, current_ts = self._get_located_and_current_utc_ts()
+
+        located['dateline'] = "city,state,country"
+        formatted_dateline = format_dateline_to_locmmmddsrc(located, current_ts)
+        self.assertEqual(formatted_dateline, 'SYDNEY, NSW, AU %s %s -' % (formatted_date,
+                                                                          ORGANIZATION_NAME_ABBREVIATION))
+
+    def test_if_task_attributes_converted_to_objectid(self):
+        doc = {
+            'task': {
+                'user': '562435231d41c835d7b5fb55',
+                'desk': ObjectId("562435241d41c835d7b5fb5d"),
+                'stage': 'test',
+                'last_authoring_desk': 3245,
+                'last_production_desk': None
+            }
+        }
+
+        convert_task_attributes_to_objectId(doc)
+        self.assertIsInstance(doc['task']['user'], ObjectId)
+        self.assertEqual(doc['task']['desk'], ObjectId("562435241d41c835d7b5fb5d"))
+        self.assertEqual(doc['task']['stage'], 'test')
+        self.assertEqual(doc['task']['last_authoring_desk'], 3245)
+        self.assertIsNone(doc['task']['last_production_desk'])

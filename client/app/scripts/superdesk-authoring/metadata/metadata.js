@@ -1,10 +1,15 @@
-
 (function() {
 
 'use strict';
 
-MetadataCtrl.$inject = ['$scope', 'desks', 'metadata', '$filter', 'privileges', 'datetimeHelper'];
-function MetadataCtrl($scope, desks, metadata, $filter, privileges, datetimeHelper) {
+MetadataCtrl.$inject = [
+    '$scope', 'desks', 'metadata', '$filter', 'privileges', 'datetimeHelper',
+    'preferencesService', 'archiveService'
+];
+function MetadataCtrl(
+    $scope, desks, metadata, $filter,
+    privileges, datetimeHelper, preferencesService, archiveService) {
+
     desks.initialize()
     .then(function() {
         $scope.deskLookup = desks.deskLookup;
@@ -13,13 +18,9 @@ function MetadataCtrl($scope, desks, metadata, $filter, privileges, datetimeHelp
 
     metadata.initialize().then(function() {
         $scope.metadata = metadata.values;
-        if ($scope.item.related_to != null) {
-            metadata.fetchAssociated($scope.item.related_to)
-            .then(function(item) {
-                $scope.associatedItem = item;
-            });
-        }
-    });
+        return preferencesService.get();
+    })
+    .then(setAvailableCategories);
 
     $scope.processGenre = function() {
         $scope.item.genre = _.map($scope.item.genre, function(g) {
@@ -27,26 +28,25 @@ function MetadataCtrl($scope, desks, metadata, $filter, privileges, datetimeHelp
         });
     };
 
-    $scope.$watch('item.publish_schedule_date', function(newValue, oldValue) {
-        setPublishScheduleDate(newValue, oldValue);
-    });
-
-    $scope.$watch('item.publish_schedule_time', function(newValue, oldValue) {
-        setPublishScheduleDate(newValue, oldValue);
-    });
+    $scope.disableAddingTargetedFor = function() {
+        return !$scope.item._editable || angular.isUndefined($scope.item.targeted_for_value) || $scope.item.targeted_for_value === '';
+    };
 
     $scope.addTargeted = function() {
         if (angular.isUndefined($scope.item.targeted_for)) {
             $scope.item.targeted_for = [];
         }
 
-        var targeted_for = {'name': $scope.item.targeted_for_value};
+        if (!angular.isUndefined($scope.item.targeted_for_value) && $scope.item.targeted_for_value !== '') {
+            var targeted_for = {'name': $scope.item.targeted_for_value};
 
-        if (angular.isUndefined(_.find($scope.item.targeted_for, targeted_for))) {
-            targeted_for.allow = angular.isUndefined($scope.item.negation) ? true : !$scope.item.negation;
-            $scope.item.targeted_for.push(targeted_for);
-            $scope.autosave($scope.item);
+            if (angular.isUndefined(_.find($scope.item.targeted_for, targeted_for))) {
+                targeted_for.allow = angular.isUndefined($scope.item.negation) ? true : !$scope.item.negation;
+                $scope.item.targeted_for.push(targeted_for);
+                $scope.autosave($scope.item);
+            }
         }
+
     };
 
     $scope.removeTargeted = function(to_remove) {
@@ -56,39 +56,120 @@ function MetadataCtrl($scope, desks, metadata, $filter, privileges, datetimeHelp
         }
     };
 
+    /**
+    * Builds a list of categories available for selection in scope. Used by
+    * the "category" menu in the Authoring metadata section.
+    *
+    * @function setAvailableCategories
+    * @param {Object} prefs - user preferences setting, including the
+    *   preferred categories settings, among other things
+    */
+    function setAvailableCategories(prefs) {
+        var all,        // all available categories
+            assigned = {},   // category codes already assigned to the article
+            filtered,
+            itemCategories,  // existing categories assigned to the article
+
+            // user's category preference settings , i.e. a map
+            // object (<category_code> --> true/false)
+            userPrefs;
+
+        all = metadata.values.categories || [];
+        userPrefs = prefs['categories:preferred'].selected || {};
+
+        // gather article's existing category codes
+        itemCategories = $scope.item.anpa_category || [];
+
+        itemCategories.forEach(function (cat) {
+            assigned[cat.qcode] = true;
+        });
+
+        filtered = _.filter(all, function (cat) {
+            return userPrefs[cat.qcode] || assigned[cat.qcode];
+        });
+
+        $scope.availableCategories = filtered;
+    }
+
+    $scope.$watch('item.publish_schedule_date', function(newValue, oldValue) {
+        setPublishScheduleDate(newValue, oldValue);
+    });
+
+    $scope.$watch('item.publish_schedule_time', function(newValue, oldValue) {
+        setPublishScheduleDate(newValue, oldValue);
+    });
+
     function setPublishScheduleDate(newValue, oldValue) {
         if (newValue !== oldValue) {
             if ($scope.item.publish_schedule_date && $scope.item.publish_schedule_time) {
                 $scope.item.publish_schedule = datetimeHelper.mergeDateTime($scope.item.publish_schedule_date,
                     $scope.item.publish_schedule_time).format();
             } else {
-                $scope.item.publish_schedule = false;
+                $scope.item.publish_schedule = null;
             }
 
             $scope.autosave($scope.item);
         }
     }
 
-    function resolvePublishScheduleDate() {
+    $scope.$watch('item.embargo_date', function(newValue, oldValue) {
+        setEmbargoTS(newValue, oldValue);
+    });
+
+    $scope.$watch('item.embargo_time', function(newValue, oldValue) {
+        setEmbargoTS(newValue, oldValue);
+    });
+
+    /**
+     * Listener method which gets invoked when either Embargo Date or Embargo Time has changed. This function takes
+     * values of both Embargo Date and Embargo Time to form Timestamp.
+     */
+    function setEmbargoTS(newValue, oldValue) {
+        if (newValue !== oldValue) {
+            if ($scope.item.embargo_date && $scope.item.embargo_time) {
+                $scope.item.embargo = datetimeHelper.mergeDateTime(
+                    $scope.item.embargo_date, $scope.item.embargo_time).format();
+            } else {
+                $scope.item.embargo = null;
+            }
+
+            $scope.autosave($scope.item);
+        }
+    }
+
+    /**
+     * Publish Schedule and Embargo are saved as Timestamps in DB but each field has date and time as two different
+     * inputs in UI. This function breaks the timestamp fetched from API to Date and Time and assigns those values to
+     * the appropriate field.
+     */
+    function resolvePublishScheduleAndEmbargoTS() {
+        if ($scope.item.embargo) {
+            var embargoTS = new Date(Date.parse($scope.item.embargo));
+            $scope.item.embargo_date = $filter('formatDateTimeString')(embargoTS, 'MM/DD/YYYY');
+            $scope.item.embargo_time = $filter('formatDateTimeString')(embargoTS, 'HH:mm:ss');
+        }
+
         if ($scope.item.publish_schedule) {
             var publishSchedule = new Date(Date.parse($scope.item.publish_schedule));
-            $scope.item.publish_schedule_date = moment(publishSchedule).utc().format('MM/DD/YYYY');
-            $scope.item.publish_schedule_time = moment(publishSchedule).utc().format('HH:mm:ss');
+            $scope.item.publish_schedule_date = $filter('formatDateTimeString')(publishSchedule, 'MM/DD/YYYY');
+            $scope.item.publish_schedule_time = $filter('formatDateTimeString')(publishSchedule, 'HH:mm:ss');
         }
     }
 
     $scope.unique_name_editable = Boolean(privileges.privileges.metadata_uniquename);
-    resolvePublishScheduleDate();
+    resolvePublishScheduleAndEmbargoTS();
 }
 
-MetadataDropdownDirective.$inject = [];
-function MetadataDropdownDirective() {
+MetadataDropdownDirective.$inject = ['$timeout'];
+function MetadataDropdownDirective($timeout) {
     return {
         scope: {
             list: '=',
             disabled: '=ngDisabled',
             item: '=',
             field: '@',
+            icon: '@',
+            label: '@',
             change: '&'
         },
         templateUrl: 'scripts/superdesk-authoring/metadata/views/metadata-dropdown.html',
@@ -97,7 +178,7 @@ function MetadataDropdownDirective() {
                 var o = {};
 
                 if (angular.isDefined(item)) {
-                    o[scope.field] = (scope.field === 'anpa_category') ? item : item.name;
+                    o[scope.field] = (scope.field === 'place' || scope.field === 'genre') ? [item] : item.value;
                 } else {
                     o[scope.field] = null;
                 }
@@ -105,48 +186,87 @@ function MetadataDropdownDirective() {
                 _.extend(scope.item, o);
                 scope.change({item: scope.item});
             };
+
+            $timeout(function() {
+                if (scope.list && scope.field === 'place') {
+                    scope.places = _.groupBy(scope.list, 'group');
+                }
+            });
         }
     };
 }
 
-MetadataWordsListEditingDirective.$inject = [];
-function MetadataWordsListEditingDirective() {
+MetadataWordsListEditingDirective.$inject = ['$timeout'];
+function MetadataWordsListEditingDirective($timeout) {
     return {
         scope: {
             item: '=',
             field: '@',
             disabled: '=',
             list: '=',
-            change: '&'
+            change: '&',
+            header: '@'
         },
         templateUrl: 'scripts/superdesk-authoring/metadata/views/metadata-words-list.html',
-        link: function(scope) {
+        link: function(scope, element) {
+            scope.words = [];
+            scope.selectedTerm = '';
 
-            var ENTER = 13;
+            $timeout(function() {
+                element.find('input, select').addClass('line-input');
 
-            scope.selectTerm = function($event) {
-                if ($event.keyCode === ENTER && _.trim(scope.term) !== '') {
-
-                    //instead of simple push, extend the item[field] in order to trigger dirty $watch
-                    var t = _.clone(scope.item[scope.field]) || [];
-                    var index = _.findIndex(t, function(word) {
-                        return word.toLowerCase() === scope.term.toLowerCase();
-                    });
-
-                    if (index < 0) {
-                        t.push(_.trim(scope.term));
-
-                        //build object
-                        var o = {};
-                        o[scope.field] = t;
-                        _.extend(scope.item, o);
-                        scope.change({item: scope.item});
-                    }
-
-                    scope.term = '';
+                if (scope.list) {
+                    scope.words = scope.list;
                 }
+            });
+
+            /**
+             * sdTypeahead directive invokes this method and is responsible for searching word(s) where the word.name
+             * matches word_to_find.
+             *
+             * @return {Array} list of word(s)
+             */
+            scope.search = function(word_to_find) {
+                if (!word_to_find) {
+                    scope.words = scope.list;
+                } else {
+                    scope.words = _.filter(scope.list, function (t) {
+                        return ((t.name.toLowerCase().indexOf(word_to_find.toLowerCase()) !== -1));
+                    });
+                }
+
+                scope.selectedTerm = word_to_find;
+                return scope.words;
             };
 
+            /**
+             * sdTypeahead directive invokes this method and is responsible for updating the item with user selected
+             * word.
+             *
+             * @param {Object} item selected word object
+             */
+            scope.select = function(item) {
+                var keyword = item ? item.value : scope.selectedTerm;
+                var t = _.clone(scope.item[scope.field]) || [];
+                var index = _.findIndex(t, function (word) {
+                    return word.toLowerCase() === keyword.toLowerCase();
+                });
+
+                if (index < 0) {
+                    t.push(keyword);
+
+                    var o = {};
+                    o[scope.field] = t;
+                    _.extend(scope.item, o);
+                    scope.change({item: scope.item});
+                }
+
+                scope.selectedTerm = '';
+            };
+
+            /**
+             * Removes the term from the user selected terms
+             */
             scope.removeTerm = function(term) {
                 var temp = _.without(scope.item[scope.field], term);
 
@@ -158,7 +278,6 @@ function MetadataWordsListEditingDirective() {
 
                 scope.change({item: scope.item});
             };
-
         }
     };
 }
@@ -173,8 +292,8 @@ function MetadataWordsListEditingDirective() {
  * @param {String} unique - specify the name of the field, in list item which is unique (qcode, value...)
  *
  */
-MetadataListEditingDirective.$inject = [];
-function MetadataListEditingDirective() {
+MetadataListEditingDirective.$inject = ['metadata'];
+function MetadataListEditingDirective(metadata) {
     return {
         scope: {
             item: '=',
@@ -188,8 +307,12 @@ function MetadataListEditingDirective() {
         },
         templateUrl: 'scripts/superdesk-authoring/metadata/views/metadata-terms.html',
         link: function(scope) {
+            metadata.subjectScope = scope;
+
             scope.$watch('list', function(items) {
-                if (!items || !items[0].hasOwnProperty('parent')) {
+                if (
+                    !items || items.length === 0
+                ) {
                     return;
                 }
 
@@ -202,8 +325,13 @@ function MetadataListEditingDirective() {
                     }
                 });
 
+                scope.terms = items;
                 scope.tree = tree;
                 scope.activeTree = tree[null];
+            });
+
+            scope.$on('$destroy', function() {
+                metadata.subjectScope = null;
             });
 
             scope.openParent = function(term, $event) {
@@ -217,17 +345,19 @@ function MetadataListEditingDirective() {
                 $event.stopPropagation();
             };
 
-            scope.terms = [];
+            scope.activeList = false;
             scope.selectedTerm = '';
             var uniqueField = scope.unique || 'qcode';
 
             scope.searchTerms = function(term) {
                 if (!term) {
-                    scope.terms = [];
+                    scope.terms = scope.list;
+                    scope.activeList = false;
                 } else {
                     scope.terms = _.filter(scope.list, function(t) {
                         var searchObj = {};
                         searchObj[uniqueField] = t[uniqueField];
+                        scope.activeList = true;
                         return ((t.name.toLowerCase().indexOf(term.toLowerCase()) !== -1) &&
                             !_.find(scope.item[scope.field], searchObj));
                     });
@@ -271,61 +401,95 @@ function MetadataListEditingDirective() {
     };
 }
 
-MetadataSliderDirective.$inject = ['desks'];
-function MetadataSliderDirective(desks) {
+MetadataLocatorsDirective.$inject = ['$timeout'];
+function MetadataLocatorsDirective($timeout) {
     return {
         scope: {
-            list: '=',
-            disabled: '=ngDisabled',
             item: '=',
+            fieldprefix: '@',
             field: '@',
-            change: '&'
+            disabled: '=ngDisabled',
+            list: '=',
+            change: '&',
+            postprocessing: '&',
+            header: '@'
         },
-        templateUrl: 'scripts/superdesk-authoring/metadata/views/metadata-slider.html',
-        link: function(scope) {
-            scope.$watch('list', function (list) {
-                if (!list) {
-                    return;
+
+        templateUrl: 'scripts/superdesk-authoring/metadata/views/metadata-locators.html',
+        link: function(scope, element) {
+            scope.selectedTerm = '';
+
+            $timeout(function() {
+                if (scope.item) {
+                    if (scope.fieldprefix && scope.item[scope.fieldprefix][scope.field]) {
+                        scope.selectedTerm = scope.item[scope.fieldprefix][scope.field].city;
+                    } else if (scope.item[scope.field]) {
+                        scope.selectedTerm = scope.item[scope.field].city;
+                    }
                 }
 
-                var maxValue = scope.list.length,
-                    currentValue = scope.item[scope.field],
-                    sliderDisabled = scope.disabled;
-
-                $('.sd-slider').slider({
-                    range: 'max',
-                    min: 0,
-                    max: maxValue,
-                    value: currentValue,
-                    disabled: sliderDisabled,
-                    create: function () {
-                        $(this).find('.ui-slider-thumb').css('left', (currentValue * 100) / maxValue + '%');
-                    },
-                    slide: function (event, ui) {
-                        $(this).find('.ui-slider-thumb').css('left', (ui.value * 100) / maxValue + '%').text(ui.value);
-                        select(scope.list[ui.value - 1]);
-                    },
-                    start: function () {
-                        $(this).find('.ui-slider-thumb').addClass('ui-slider-thumb-active');
-                    },
-                    stop: function () {
-                        $(this).find('.ui-slider-thumb').removeClass('ui-slider-thumb-active');
-                    }
-                });
+                if (scope.list) {
+                    scope.locators = scope.list;
+                }
             });
 
-            function select(item) {
-                var o = {};
-
-                if (angular.isDefined(item)) {
-                    o[scope.field] = (scope.field === 'anpa_category') ? item : item.name;
+            /**
+             * sdTypeahead directive invokes this method and is responsible for searching located object(s) where the
+             * city name matches locator_to_find.
+             *
+             * @return {Array} list of located object(s)
+             */
+            scope.searchLocator = function(locator_to_find) {
+                if (!locator_to_find) {
+                    scope.locators = scope.list;
                 } else {
-                    o[scope.field] = null;
+                    scope.locators = _.filter(scope.list, function(t) {
+                        return ((t.city.toLowerCase().indexOf(locator_to_find.toLowerCase()) !== -1));
+                    });
                 }
 
-                _.extend(scope.item, o);
-                scope.change({item: scope.item});
-            }
+                scope.selectedTerm = locator_to_find;
+                return scope.locators;
+            };
+
+            /**
+             * sdTypeahead directive invokes this method and is responsible for updating the item with user selected
+             * located object.
+             *
+             * @param {Object} locator user selected located object
+             */
+            scope.selectLocator = function(locator) {
+                var updates = {};
+
+                if (!locator && scope.selectedTerm) {
+                    var previousLocator = scope.fieldprefix ? scope.item[scope.fieldprefix][scope.field] :
+                                            scope.item[scope.field];
+
+                    if (scope.selectedTerm === previousLocator.city) {
+                        locator = previousLocator;
+                    } else {
+                        locator = {'city': scope.selectedTerm, 'city_code': scope.selectedTerm, 'tz': 'UTC',
+                            'dateline': 'city', 'country': '', 'country_code': '', 'state_code': '', 'state': ''};
+                    }
+                }
+
+                if (locator) {
+                    if (angular.isDefined(scope.fieldprefix)) {
+                        updates[scope.fieldprefix] = scope.item[scope.fieldprefix];
+                        updates[scope.fieldprefix][scope.field] = locator;
+                    } else {
+                        updates[scope.field] = locator;
+                    }
+
+                    scope.selectedTerm = locator.city;
+                    _.extend(scope.item, updates);
+                }
+
+                var selectedLocator = {item: scope.item, city: scope.selectedTerm};
+
+                scope.postprocessing(selectedLocator);
+                scope.change(selectedLocator);
+            };
         }
     };
 }
@@ -354,13 +518,6 @@ function MetadataService(api, $q) {
                 self.values.subjectcodes = result._items;
             });
         },
-        fetchAssociated: function(_id) {
-            if (_id != null) {
-                return api('archive').getById(_id).then(function(_item) {
-                    return _item;
-                });
-            }
-        },
         removeSubjectTerm: function(term) {
             var self = this,
                 tempItem = {},
@@ -377,11 +534,19 @@ function MetadataService(api, $q) {
 
             self.subjectScope.change({item: self.subjectScope.item});
         },
+        fetchCities: function() {
+            var self = this;
+            return api.get('/cities').then(function(result) {
+                self.values.cities = result._items;
+            });
+        },
         initialize: function() {
             if (!this.loaded) {
                 this.loaded = this.fetchMetadataValues()
-                    .then(angular.bind(this, this.fetchSubjectcodes));
+                    .then(angular.bind(this, this.fetchSubjectcodes))
+                    .then(angular.bind(this, this.fetchCities));
             }
+
             return this.loaded;
         }
     };
@@ -395,10 +560,11 @@ angular.module('superdesk.authoring.metadata', ['superdesk.authoring.widgets'])
             .widget('metadata', {
                 icon: 'info',
                 label: gettext('Info'),
+                removeHeader: true,
                 template: 'scripts/superdesk-authoring/metadata/views/metadata-widget.html',
                 order: 1,
                 side: 'right',
-                display: {authoring: true, packages: true}
+                display: {authoring: true, packages: true, legalArchive: true}
             });
     }])
 
@@ -407,5 +573,5 @@ angular.module('superdesk.authoring.metadata', ['superdesk.authoring.widgets'])
     .directive('sdMetaTerms', MetadataListEditingDirective)
     .directive('sdMetaDropdown', MetadataDropdownDirective)
     .directive('sdMetaWordsList', MetadataWordsListEditingDirective)
-    .directive('sdMetaSlider', MetadataSliderDirective);
+    .directive('sdMetaLocators', MetadataLocatorsDirective);
 })();

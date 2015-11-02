@@ -8,14 +8,8 @@
         <div class="field">
             <label for="destination-format" translate>Format</label>
             <select id="destination-format" class="input" required ng-model="destination.format">
-                <option value="nitf" translate>NITF</option>
-                <option value="newsml12" translate>AAP NewsML 1.2</option>
-                <option value="AAP IPNEWS" translate>AAP IPNEWS</option>
-                <option value="AAP ANPA" translate>AAP ANPA</option>
-                <option value="ninjs" translate>NINJS</option>
-                <option value="newsmlg2" translate>NewsML G2</option>
-                <option value="AAP BULLETIN BUILDER" translate>AAP Bulletin Builder</option>
-                <option value="AAP SMS" translate>AAP SMS</option>
+                <option value=""></option>
+                <option value="{{format.value}}" ng-selected="format.value === destination.format" ng-repeat="format in $parent.formats track by format.value">{{:: format.name | translate}}</option>
             </select>
         </div>
 
@@ -29,7 +23,7 @@
         </div>
 
         <div class="field" ng-if="actions">
-            <button type="button" class="btn btn-info" ng-repeat="action in actions" ng-click="action.fn(destination)">
+            <button type="button" class="btn" ng-repeat="action in actions" ng-click="action.fn(destination)">
                 <span translate>{{:: action.label}}</span>
             </button>
         </div>

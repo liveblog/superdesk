@@ -361,8 +361,8 @@ define([
         };
     }
 
-    IngestSourcesContent.$inject = ['providerTypes', 'gettext', 'notify', 'api', '$location', 'modal'];
-    function IngestSourcesContent(providerTypes, gettext, notify, api, $location, modal) {
+    IngestSourcesContent.$inject = ['providerTypes', 'gettext', 'notify', 'api', '$location', 'modal', '$filter'];
+    function IngestSourcesContent(providerTypes, gettext, notify, api, $location, modal, $filter) {
         return {
             templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-sources-content.html',
             link: function($scope) {
@@ -393,6 +393,7 @@ define([
                 function fetchProviders() {
                     return api.ingestProviders.query({max_results: 200})
                         .then(function(result) {
+                            result._items = $filter('sortByName')(result._items);
                             $scope.providers = result;
                         });
                 }
@@ -424,11 +425,11 @@ define([
                 });
 
                 api('rule_sets').query().then(function(result) {
-                    $scope.rulesets = result._items;
+                    $scope.rulesets = $filter('sortByName')(result._items);
                 });
 
                 api('routing_schemes').query().then(function(result) {
-                    $scope.routingScheme = result._items;
+                    $scope.routingScheme = $filter('sortByName')(result._items);
                 });
 
                 $scope.fetchSourceErrors = function() {
@@ -617,8 +618,8 @@ define([
         };
     }
 
-    IngestRulesContent.$inject = ['api', 'gettext', 'notify', 'modal'];
-    function IngestRulesContent(api, gettext, notify, modal) {
+    IngestRulesContent.$inject = ['api', 'gettext', 'notify', 'modal', '$filter'];
+    function IngestRulesContent(api, gettext, notify, modal, $filter) {
         return {
             templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-rules-content.html',
             link: function(scope) {
@@ -627,7 +628,7 @@ define([
                 scope.editRuleset = null;
 
                 api('rule_sets').query().then(function(result) {
-                    scope.rulesets = result._items;
+                    scope.rulesets = $filter('sortByName')(result._items);
                 });
 
                 scope.edit = function(ruleset) {
@@ -643,6 +644,8 @@ define([
                         if (_new) {
                             scope.rulesets.push(_orig);
                         }
+
+                        scope.rulesets = $filter('sortByName')(scope.rulesets);
                         notify.success(gettext('Rule set saved.'));
                         scope.cancel();
                     }, function(response) {
@@ -691,21 +694,38 @@ define([
         };
     }
 
-    IngestRoutingContent.$inject = ['api', 'gettext', 'notify', 'modal'];
-    function IngestRoutingContent(api, gettext, notify, modal) {
+    /**
+     * @memberof superdesk.ingest
+     * @ngdoc directive
+     * @name sdIngestRoutingContent
+     * @description
+     *   Creates the main page for adding or editing routing rules (in the
+     *   modal for editing ingest routing schemes).
+     */
+    IngestRoutingContent.$inject = ['api', 'gettext', 'notify', 'modal', 'contentFilters', '$filter'];
+    function IngestRoutingContent(api, gettext, notify, modal, contentFilters, $filter) {
         return {
             templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-routing-content.html',
             link: function(scope) {
-                var _orig = null;
+                var filtersStartPage = 1,  // the fetch results page to start from
+                    _orig = null;
+
                 scope.editScheme = null;
                 scope.rule = null;
                 scope.ruleIndex = null;
                 scope.schemes = [];
 
-                api('routing_schemes')
-                .query()
-                .then(function(result) {
-                    scope.schemes = result._items;
+                api('routing_schemes').query().then(function(result) {
+                    scope.schemes = $filter('sortByName')(result._items);
+                });
+
+                scope.contentFilters = [];
+
+                contentFilters.getAllContentFilters(
+                    filtersStartPage, scope.contentFilters
+                )
+                .then(function (filters) {
+                    scope.contentFilters = filters;
                 });
 
                 function confirm(context) {
@@ -724,12 +744,16 @@ define([
 
                 scope.save = function() {
                     if (scope.rule) {
+                        // filterName was only needed to display it in the UI
+                        delete scope.rule.filterName;
+
                         if (scope.ruleIndex === -1) {
                             scope.editScheme.rules.push(scope.rule);
                         } else {
                             scope.editScheme.rules[scope.ruleIndex] = scope.rule;
                         }
                     }
+
                     scope.editScheme.rules = _.reject(scope.editScheme.rules, {name: null});
                     var _new = scope.editScheme._id ? false : true;
                     api('routing_schemes').save(_orig, scope.editScheme)
@@ -737,6 +761,7 @@ define([
                         if (_new) {
                             scope.schemes.push(_orig);
                         }
+                        scope.schemes = $filter('sortByName')(scope.schemes);
                         notify.success(gettext('Routing scheme saved.'));
                         scope.cancel();
                     }, function(response) {
@@ -744,7 +769,7 @@ define([
                     });
                 };
 
-                scope.cancel = function() {
+                scope.cancel = function () {
                     scope.editScheme = null;
                     scope.rule = null;
                 };
@@ -776,15 +801,7 @@ define([
                 scope.addRule = function() {
                     var rule = {
                         name: null,
-                        filter: {
-                            type: [],
-                            headline: '',
-                            slugline: '',
-                            body: '',
-                            subject: [],
-                            category: [],
-                            genre: []
-                        },
+                        filter: null,
                         actions: {
                             fetch: [],
                             publish: [],
@@ -800,8 +817,22 @@ define([
                     scope.editRule(rule);
                 };
 
-                scope.editRule = function(rule) {
+                /**
+                 * Opens the given routing scheme rule for editing.
+                 *
+                 * @method editRule
+                 * @param {Object} rule - routing scheme rule's config data
+                 */
+                scope.editRule = function (rule) {
+                    var filter;
+
                     scope.rule = rule;
+
+                    filter = _.find(scope.contentFilters, {_id: rule.filter});
+                    if (filter) {
+                        // filterName needed to display it in the UI
+                        scope.rule.filterName = filter.name;
+                    }
                 };
 
                 scope.reorder = function(start, end) {
@@ -811,27 +842,8 @@ define([
         };
     }
 
-    var typeLookup = {
-        text: 'Text',
-        preformatted: 'Preformatted text',
-        picture: 'Picture',
-        audio: 'Audio',
-        video: 'Video',
-        composite: 'Package'
-    };
-
-    var dayLookup = {
-        MON: 'Monday',
-        TUE: 'Tuesday',
-        WED: 'Wednesday',
-        THU: 'Thursday',
-        FRI: 'Friday',
-        SAT: 'Saturday',
-        SUN: 'Sunday'
-    };
-
-    IngestRoutingGeneral.$inject = ['desks', 'macros'];
-    function IngestRoutingGeneral(desks, macros) {
+    IngestRoutingGeneral.$inject = ['weekdays', 'desks', 'macros'];
+    function IngestRoutingGeneral(weekdays, desks, macros) {
         return {
             scope: {
                 rule: '=',
@@ -839,8 +851,7 @@ define([
             },
             templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-routing-general.html',
             link: function(scope) {
-                scope.typeLookup = typeLookup;
-                scope.dayLookup = dayLookup;
+                scope.dayLookup = weekdays;
                 scope.macroLookup = {};
 
                 desks.initialize()
@@ -864,120 +875,104 @@ define([
         };
     }
 
-    IngestRoutingFilter.$inject = ['api', 'subjectService'];
-    function IngestRoutingFilter(api, subjectService) {
+    /**
+     * @memberof superdesk.ingest
+     * @ngdoc directive
+     * @name sdIngestRoutingFilter
+     * @description
+     *   Creates the Filter tab used for defining a content filter for routing
+     *   rules (found in the modal for editing ingest routing schemes).
+     */
+    IngestRoutingFilter.$inject = [];
+    function IngestRoutingFilter() {
+
+        /**
+         * Creates an utility method on the built-in RegExp object used for
+         * escaping arbitrary strings so that they can be safely used in
+         * dynamically created regular expressions patterns.
+         *
+         * The idea is to find all characters in the given string that have a
+         * special meaning in regex definition, and replace them with their
+         * escaped versions. For example:
+         *     '^' becomes '\\^', '*' becomes '\\*', etc.
+         *
+         * Usage example (creating a new regex pattern):
+         *
+         *     var regex = new RegExp(RegExp.escape(unsafeString));
+         *
+         * Taken from http://stackoverflow.com/a/3561711/5040035
+         *
+         * @method escape
+         * @param {string} s - the string to escape
+         * @return {string} - an escaped version of the given string
+         */
+        // XXX: should probably be moved into some utils module - but where?
+        RegExp.escape = function (s) {
+            return s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        };
+
         return {
-            scope: {rule: '='},
-            templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-routing-filter.html',
+            scope: {
+                rule: '=',
+                filters: '=contentFilters'
+            },
+            templateUrl: 'scripts/superdesk-ingest/views/settings' +
+                         '/ingest-routing-filter.html',
             link: function(scope) {
-                scope.typeList = [
-                    'text',
-                    'preformatted',
-                    'picture',
-                    'audio',
-                    'video',
-                    'composite'
-                ];
-                scope.typeLookup = typeLookup;
-                scope.subjects = [];
-                scope.subjectTerm = '';
-                scope.filteredSubjects = [];
+                var currFilter;
 
-                scope.categories = [];
-                scope.categoryTerm = '';
-                scope.filteredCategories = [];
+                scope.matchingFilters = [];  // used for filter search
+                scope.filterSearchTerm = null;
 
-                scope.genres = [];
-                scope.genreTerm = '';
-                scope.filteredGenres = [];
+                currFilter = _.find(scope.filters, {_id: scope.rule.filter});
+                if (currFilter) {
+                    scope.selectedFilter = currFilter;
+                } else {
+                    scope.selectedFilter = null;
+                }
 
-                subjectService
-                .initialize()
-                .then(function(subjects) {
-                    scope.subjects = subjects;
-                });
+                /**
+                 * Finds a subset of all content filters whose names contain
+                 * the given search term. The search is case-insensitive.
+                 * As a result, the matchingFilters list is updated.
+                 *
+                 * @method searchFilters
+                 * @param {string} term - the string to search for
+                 */
+                scope.searchFilters = function (term) {
+                    var regex = new RegExp(RegExp.escape(term), 'i');
 
-                api.get('vocabularies')
-                .then(function(result) {
-                    scope.categories = _.find(result._items, {_id: 'categories'}).items;
-                    scope.genres = _.find(result._items, {_id: 'genre'}).items;
-                });
-
-                scope.isTypeChecked = function(rule, type) {
-                    return rule.filter.type.indexOf(type) !== -1;
+                    scope.matchingFilters = _.filter(
+                        scope.filters,
+                        function (filter) {
+                            return regex.test(filter.name);
+                        }
+                    );
                 };
 
-                scope.toggleType = function(rule, type) {
-                    if (scope.isTypeChecked(rule, type)) {
-                        rule.filter.type = _.without(rule.filter.type, type);
-                    } else {
-                        rule.filter.type.push(type);
-                    }
+                /**
+                 * Sets the given filter as the content filter for the routing
+                 * rule.
+                 *
+                 * @method selectFilter
+                 * @param {Object} filter - the content filter to select
+                 */
+                scope.selectFilter = function (filter) {
+                    scope.selectedFilter = filter;
+                    scope.rule.filter = filter._id;
+                    scope.rule.filterName = filter.name;
+                    scope.filterSearchTerm = null;
                 };
 
-                scope.removeSubject = function(subject) {
-                    _.remove(scope.rule.filter.subject, function(s) {
-                        return s.qcode === subject.qcode;
-                    });
-                };
-
-                scope.selectSubject = function(item) {
-                    scope.rule.filter.subject.push({qcode: item.qcode, name: item.name});
-                    scope.subjectTerm = '';
-                };
-
-                scope.searchSubjects = function(term) {
-                    var regex = new RegExp(term, 'i');
-                    scope.filteredSubjects = _.filter(scope.subjects, function(subject) {
-                        return (
-                            regex.test(subject.name) &&
-                            _.findIndex(scope.rule.filter.subject, {qcode: subject.qcode}) === -1
-                        );
-                    });
-                };
-
-                scope.removeCategory = function(category) {
-                    _.remove(scope.rule.filter.category, function(c) {
-                        return c.qcode === category.qcode;
-                    });
-                };
-
-                scope.selectCategory = function(item) {
-                    scope.rule.filter.category.push({qcode: item.value, name: item.name});
-                    scope.categoryTerm = '';
-                };
-
-                scope.searchCategories = function(term) {
-                    var regex = new RegExp(term, 'i');
-                    scope.filteredCategories = _.filter(scope.categories, function(category) {
-                        return (
-                            regex.test(category.name) &&
-                            _.findIndex(scope.rule.filter.category, {qcode: category.value}) === -1 &&
-                            category.is_active === true
-                        );
-                    });
-                };
-
-                scope.removeGenre = function(genre) {
-                    _.remove(scope.rule.filter.genre, function(g) {
-                        return g === genre;
-                    });
-                };
-
-                scope.selectGenre = function(item) {
-                    scope.rule.filter.genre.push(item.value);
-                    scope.genreTerm = '';
-                };
-
-                scope.searchGenres = function(term) {
-                    var regex = new RegExp(term, 'i');
-                    scope.filteredGenres = _.filter(scope.genres, function(genre) {
-                        return (
-                            regex.test(genre.name) &&
-                            scope.rule.filter.genre.indexOf(genre.value) === -1 &&
-                            genre.is_active === true
-                        );
-                    });
+                /**
+                 * Clears the routing rule's content filter.
+                 *
+                 * @method clearSelectedFilter
+                 */
+                scope.clearSelectedFilter = function () {
+                    scope.selectedFilter = null;
+                    scope.rule.filter = null;
+                    scope.rule.filterName = null;
                 };
             }
         };
@@ -1036,25 +1031,80 @@ define([
         };
     }
 
-    IngestRoutingSchedule.$inject = [];
-    function IngestRoutingSchedule() {
+    /**
+     * @memberof superdesk.ingest
+     * @ngdoc directive
+     * @name sdIngestRoutingSchedule
+     * @description
+     *   Creates the Schedule section (tab) of the routing rule edit form.
+     */
+    IngestRoutingSchedule.$inject = ['tzdata'];
+    function IngestRoutingSchedule(tzdata) {
         return {
-            scope: {rule: '='},
+            scope: {
+                rule: '='  // the routing rule whose schedule is being edited
+            },
             templateUrl: 'scripts/superdesk-ingest/views/settings/ingest-routing-schedule.html',
-            link: function(scope) {
-                scope.dayList = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-                scope.dayLookup = dayLookup;
+            link: function (scope, element, attrs) {
 
-                scope.isDayChecked = function(rule, day) {
-                    return rule.schedule.day_of_week.indexOf(day) !== -1;
+                scope.timeZones = [];     // all time zones to choose from
+                scope.tzSearchTerm = '';  // the current time zone search term
+
+                // filtered time zone list containing only those that match
+                // user-provided search term
+                scope.matchingTimeZones = [];
+
+                tzdata.$promise.then(function () {
+                    scope.timeZones = tzdata.getTzNames();
+                });
+
+                /**
+                 * Sets the list of time zones to select from to only those
+                 * that contain the given search term (case-insensitive).
+                 * If the search term is empty, it results in an empty list.
+                 *
+                 * @method searchTimeZones
+                 * @param {string} searchTerm
+                 */
+                scope.searchTimeZones = function (searchTerm) {
+                    var termLower;
+
+                    scope.tzSearchTerm = searchTerm;
+
+                    if (!searchTerm) {
+                        scope.matchingTimeZones = [];
+                        return;
+                    }
+
+                    termLower = searchTerm.toLowerCase();
+                    scope.matchingTimeZones = _.filter(
+                        scope.timeZones,
+                        function (item) {
+                            return (item.toLowerCase().indexOf(termLower) >= 0);
+                        }
+                    );
                 };
 
-                scope.toggleDay = function(rule, day) {
-                    if (scope.isDayChecked(rule, day)) {
-                        rule.schedule.day_of_week = _.without(rule.schedule.day_of_week, day);
-                    } else {
-                        rule.schedule.day_of_week.push(day);
-                    }
+                /**
+                 * Sets the time zone of the routing rule's schedule and resets
+                 * the current time zone search term.
+                 *
+                 * @method selectTimeZone
+                 * @param {string} timeZone - name of the time zone to select
+                 */
+                scope.selectTimeZone = function (timeZone) {
+                    scope.rule.schedule.time_zone = timeZone;
+                    scope.tzSearchTerm = '';
+                };
+
+                /**
+                 * Clears the currently selected time zone of the routing
+                 * rule's schedule.
+                 *
+                 * @method clearSelectedTimeZone
+                 */
+                scope.clearSelectedTimeZone = function () {
+                    scope.rule.schedule.time_zone = null;
                 };
             }
         };
@@ -1189,7 +1239,7 @@ define([
                         '$and': where
                     });
 
-                    api.activity.query(criteria).then(function (result) {
+                    api.query('activity', criteria).then(function (result) {
                         scope.log_messages = result._items;
                     });
                 }
@@ -1320,6 +1370,7 @@ define([
                 templateUrl: 'scripts/superdesk-archive/views/list.html',
                 category: '/workspace',
                 topTemplateUrl: 'scripts/superdesk-dashboard/views/workspace-topnav.html',
+                sideTemplateUrl: 'scripts/superdesk-workspace/views/workspace-sidenav.html',
                 privileges: {ingest: 1}
             })
             .activity('/settings/ingest', {
@@ -1334,11 +1385,13 @@ define([
                 templateUrl: 'scripts/superdesk-ingest/views/dashboard/dashboard.html',
                 controller: IngestDashboardController,
                 category: superdesk.MENU_MAIN,
+                priority: 100,
+                adminTools: true,
                 privileges: {ingest_providers: 1}
             })
             .activity('fetchAs', {
-                label: gettext('Fetch As'),
-                icon: 'archive',
+                label: gettext('Fetch To'),
+                icon: 'fetch-as',
                 controller: ['data', 'send', function(data, send) {
                     send.allAs([data.item]);
                 }],
@@ -1386,23 +1439,24 @@ define([
                 filters: [{action: 'list', type: 'externalsource'}],
                 privileges: {fetch: 1}
             })
-            .activity('text_archive', {
-                label: gettext('Delete from text archive'),
+            .activity('archived', {
+                label: gettext('Delete from Archived'),
                 icon: 'remove',
                 monitor: true,
                 controller: ['api', 'data', function(api, data) {
+                    var itemToDelete = {'_id': data.item.item_id, '_etag': data.item._etag};
                     api
-                        .remove(data.item, {}, 'text_archive')
+                        .remove(itemToDelete, {}, 'archived')
                         .then(
                             function(response) {
                                 data.item.error = response;
                             })
                     ['finally'](function() {
-                        data.item.actioning.text_archive = false;
+                        data.item.actioning.archived = false;
                     });
                 }],
-                filters: [{action: 'list', type: 'text_archive'}],
-                privileges: {textarchive: 1}
+                filters: [{action: 'list', type: 'archived'}],
+                privileges: {archived: 1}
             });
     }]);
 
@@ -1431,8 +1485,8 @@ define([
         });
     }]);
 
-    SendService.$inject = ['desks', 'api', '$q'];
-    function SendService(desks, api, $q) {
+    SendService.$inject = ['desks', 'api', '$q', 'notify', 'authoringWorkspace'];
+    function SendService(desks, api, $q, notify, authoringWorkspace) {
         this.one = sendOne;
         this.all = sendAll;
 
@@ -1457,11 +1511,19 @@ define([
                     function(archiveItem) {
                         item.task_id = archiveItem.task_id;
                         item.archived = archiveItem._created;
+                        return archiveItem;
                     }, function(response) {
+                        var message = 'Failed to fetch the item';
+                        if (angular.isDefined(response.data._message)) {
+                            message = message + ': ' + response.data._message;
+                        }
+                        notify.error(gettext(message));
                         item.error = response;
                     })
                 ['finally'](function() {
-                    item.actioning.archive = false;
+                    if (item.actioning) {
+                        item.actioning.archive = false;
+                    }
                 });
         }
 
@@ -1488,6 +1550,9 @@ define([
             var data = getData(config);
             return api.save('fetch', {}, data, item).then(function(archived) {
                 item.archived = archived._created;
+                if (config.open) {
+                    authoringWorkspace.edit(archived);
+                }
                 return archived;
             });
 
