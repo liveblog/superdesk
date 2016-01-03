@@ -366,6 +366,10 @@
 
         $scope.activate($scope.methods[0]);
 
+        $scope.removeImage = function() {
+            return $scope.resolve(null);
+        }
+
         $scope.upload = function(config) {
             var form = {};
             form.CropLeft = Math.round(Math.min(config.cords.x, config.cords.x2));
