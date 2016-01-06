@@ -368,7 +368,7 @@
 
         $scope.removeImage = function() {
             return $scope.resolve(null);
-        }
+        };
 
         $scope.upload = function(config) {
             var form = {};
