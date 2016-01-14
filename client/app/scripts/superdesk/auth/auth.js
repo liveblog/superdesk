@@ -103,7 +103,8 @@ define([
         }])
 
         // watch session token, identity
-        .run(['$rootScope', '$http', '$window', 'session', 'api', 'superdeskFlags', 'authoringWorkspace', 'modal', 'gettext', 'SESSION_EVENTS',
+        .run([
+        '$rootScope', '$http', '$window', 'session', 'api', 'superdeskFlags', 'authoringWorkspace', 'modal', 'gettext', 'SESSION_EVENTS',
         function($rootScope, $http, $window, session, api, superdeskFlags, authoringWorkspace, modal, gettext, SESSION_EVENTS) {
             $rootScope.logout = function() {
 
