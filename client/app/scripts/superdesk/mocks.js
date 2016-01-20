@@ -1,6 +1,14 @@
 (function() {
 'use strict';
 
+beforeEach(module(function($provide) {
+    $provide.constant('lodash', window._);
+    $provide.constant('langmap', window.languageMappingList);
+}));
+
+beforeEach(module('superdesk.mocks'));
+beforeEach(module('superdesk.services.storage'));
+
 /**
  * Mock services that call server on init and thus would require mocking all the time
  */
