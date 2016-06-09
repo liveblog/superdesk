@@ -12,7 +12,8 @@ define([
     './sdDragDrop',
     './sdTypeahead',
     './sdSlider',
-    './sdSearchList'
+    './sdSearchList',
+    './sdPasswordStrength'
 ], function(require) {
     'use strict';
 
@@ -29,6 +30,7 @@ define([
         require('./sdDragDrop').name,
         require('./sdTypeahead').name,
         require('./sdSlider').name,
-        require('./sdSearchList').name
+        require('./sdSearchList').name,
+        require('./sdPasswordStrength').name
     ];
 });
