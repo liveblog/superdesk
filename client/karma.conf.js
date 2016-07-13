@@ -1,12 +1,8 @@
 'use strict';
 
-module.exports = function(config) {
-    config.set({
-        frameworks: [
-            'jasmine',
-            'requirejs'
-        ],
+module.exports = require('superdesk-core/karma.conf.js');
 
+<<<<<<< HEAD
         preprocessors: {
             '**/*.html': ['ng-html2js'],
             '**/superdesk/**/*.js': ['coverage'],
@@ -77,3 +73,5 @@ module.exports = function(config) {
         singleRun: false
     });
 };
+=======
+>>>>>>> mainupstream-master

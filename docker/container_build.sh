@@ -24,7 +24,7 @@ RUN_FRONTEND_UNIT=${bamboo_RUN_FRONTEND_UNIT:=1}
 RUN_E2E=${bamboo_RUN_E2E:=1}
 
 # install script requirements
-virtualenv -p python2 $SCRIPT_DIR/env
+virtualenv $SCRIPT_DIR/env
 set +u
 . $SCRIPT_DIR/env/bin/activate
 set -u
@@ -32,6 +32,7 @@ pip install -q -r $SCRIPT_DIR/requirements.txt || exit 1
 
 
 export COMPOSE_PROJECT_NAME=build_$INSTANCE
+export COMPOSE_HTTP_TIMEOUT=600
 
 
 # {{{
@@ -90,21 +91,9 @@ docker-compose up -d
 # don't give if some of the tests failed:
 set +e
 
-if [[ $RUN_BACKEND_UNIT = 1 ]] ; then
-	docker-compose run backend ./scripts/fig_wrapper.sh nosetests --with-xunit --xunit-file=./results-unit/unit.xml --logging-level ERROR ;
-fi
-
-if [[ $RUN_BACKEND_BEHAVE = 1 ]] ; then
-	docker-compose run backend ./scripts/fig_wrapper.sh behave --junit --junit-directory ./results-behave/  --format progress2 --logging-level ERROR ;
-fi
-
-if [[ $RUN_FRONTEND_UNIT = 1 ]] ; then
-	docker-compose run frontend bash -c "grunt bamboo && mv test-results.xml ./unit-test-results/" ;
-fi
-
 if [[ $RUN_E2E = 1 ]] ; then
 	# create admin user:
-	docker-compose run backend ./scripts/fig_wrapper.sh python3 manage.py users:create -u admin -p admin -e 'admin@example.com' --admin=true &&
+	docker-compose run superdesk ./scripts/fig_wrapper.sh python3 manage.py users:create -u admin -p admin -e 'admin@example.com' --admin &&
 	echo "+++ new user has been created" &&
 
 	# run e2e tests:
