@@ -685,6 +685,11 @@ angular.module('superdesk.editor', ['superdesk.editor.spellcheck'])
                         updateTimeout = $timeout(updateModel, 800, false);
                     });
 
+                    //update model on markup changes as well
+                    scope.medium.subscribe('editableInput', function (event, editable) {
+                        updateTimeout = $timeout(updateModel, 800, false);
+                    });
+
                     editorElem.on('contextmenu', function(event) {
                         if (editor.isErrorNode(event.target)) {
                             event.preventDefault();
