@@ -34,9 +34,9 @@
         <li ng-repeat="item in menu | filter:{ adminTools: false } | orderBy:'priority'" ng-class="{active: item.isActive}">
           <a ng-href="#{{ :: item.href }}" title="{{ :: item.description | translate }}">{{ :: item.label | translate }}</a>
         </li>
-        <li class="main-menu_group-header" ng-if="adminOptions.length > 0">Providers Blogs</li>
+        <li class="main-menu_group-header" ng-if="providersOptions.length > 0">Providers Blogs</li>
         <li 
-          ng-repeat="item in menu | filter:{ providersBlogs: true } | orderBy:'priority' as adminOptions"
+          ng-repeat="item in menu | filter:{ providersBlogs: true } | orderBy:'priority' as providersOptions"
           ng-class="{active: item.isActive}">
           <a 
             ng-href="#{{ :: item.href }}" 
