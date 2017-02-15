@@ -58,7 +58,8 @@ define(['angular'], function(angular) {
                     try {
                         tooLate = true;
                         elem[0].pause();
-                        localMediaStream.stop();
+                        var track = localMediaStream.getTracks()[0]
+                        track.stop();
                     } catch (err) {}
                 });
             }
