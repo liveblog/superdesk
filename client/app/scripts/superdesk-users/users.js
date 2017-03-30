@@ -908,7 +908,6 @@
                     onupdate: '&'
                 },
                 link: function(scope, elem) {
-                  console.log('config', config);
                     scope.privileges = privileges.privileges;
                     scope.features = features;
                     scope.usernamePattern = usersService.usernamePattern;
@@ -919,7 +918,6 @@
                     scope.errorMessage = null;
 
                     scope.isNetworkSubscription = function() {
-                      console.log('hi', !config.subscriptionLevel);
                         return !config.subscriptionLevel;
                     }
 
