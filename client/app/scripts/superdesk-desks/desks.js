@@ -888,10 +888,16 @@
                     };
 
                     function errorMessage(response) {
-                        if (response.data && response.data._issues && response.data._issues.name && response.data._issues.name.unique) {
-                            scope._errorUniqueness = true;
-                        } else {
-                            scope._error = true;
+                        scope._error = true;
+                        scope._errorMessage = gettext('There was a problem, desk not created/updated.');
+
+                        if (response.data && response.data._issues) {
+                            if (response.data._issues.name && response.data._issues.name.unique) {
+                                scope._errorMessage = $interpolate(gettext(
+                                    'Desk with name ' + name + ' already exists.'))({name: scope.desk.edit.name});
+                            } else if (response.data._issues['validator exception']) {
+                                scope._errorMessage = gettext(response.data._issues['validator exception']);
+                            }
                         }
                         scope.message = null;
                     }

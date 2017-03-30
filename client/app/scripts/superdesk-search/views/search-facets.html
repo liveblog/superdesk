@@ -1,17 +1,31 @@
 <div>
     <div class="header">
-        <div class="icon" ng-click="flags.facets = !flags.facets">
-            <i class="icon-filter-large"></i>
-        </div>
-        <ul>
+      <div class="backlink-toolbar" ng-show="editingSearch && !activateSearchPane">
+        <button ng-click="cancel()" class="backlink"><span translate>Back / Cancel</span></button>
+      </div>
+        <ul ng-show="!editingSearch || activateSearchPane">
             <li ng-class="{active: sTab}" ng-click="sTab = true" translate>Advanced Search</li>
             <li ng-show="privileges.saved_searches == 1" ng-class="{active: !sTab}" ng-click="sTab = false" translate>Saved</li>
         </ul>
         <div class="doopen" ng-click="flags.facets = false"><i class="icon-backward-thin"></i></div>
     </div>
     <div class="content" ng-if="sTab">
-
-        <div sd-search-within></div>
+        <div id="edit-search-name" class="edit-search" ng-show="editingSearch && !activateSearchPane">
+          <form name="viewsForm">
+            <fieldset>
+              <div class="field">
+                <input id="search_name" type="text" class="fullwidth-input line-input" ng-model="edit.name" placeholder="{{:: 'Name' | translate}}" required>
+              </div>
+              <div class="field">
+                <textarea id="search_description" class="line-input" sd-auto-height ng-model="edit.description" placeholder="{{:: 'Description' | translate}}"></textarea>
+              </div>
+              <div class="field">
+                <span id="search_global" sd-switch ng-model="edit.is_global"></span>
+                <label class="label--inline" translate>Make global</label>
+              </div>
+            </fieldset>
+          </form>
+        </div>
 
         <div id="search-parameters" sd-toggle-box data-title="{{:: 'Parameters' | translate }}" data-open="false">
             <div sd-item-search data-repo="repo" data-context="context"></div>

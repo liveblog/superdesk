@@ -64,9 +64,9 @@ define([
     angular.module('superdesk.session', [])
         .constant('SESSION_EVENTS', {
             LOGIN: 'login',
-            LOGOUT: 'logout'
-        })
-        .service('session', require('./session-service'));
+            LOGOUT: 'logout',
+            IDENTITY_LOADED: 'identity_loaded'
+        });
 
     return angular.module('superdesk.auth', [
         'superdesk.features',
@@ -103,8 +103,9 @@ define([
         }])
 
         // watch session token, identity
-        .run(['$rootScope', '$route', '$location', '$http', '$window', 'session', 'api',
-        function($rootScope, $route, $location, $http, $window, session, api) {
+        .run([
+        '$rootScope', '$http', '$window', 'session', 'api', 'superdeskFlags', 'authoringWorkspace', 'modal', 'gettext', 'SESSION_EVENTS',
+        function($rootScope, $http, $window, session, api, superdeskFlags, authoringWorkspace, modal, gettext, SESSION_EVENTS) {
             $rootScope.logout = function() {
 
                 function replace() {
@@ -122,6 +123,7 @@ define([
                 return session.identity;
             }, function (identity) {
                 $rootScope.currentUser = session.identity;
+                $rootScope.$broadcast(SESSION_EVENTS.IDENTITY_LOADED);
             });
 
             // set auth header

@@ -295,9 +295,10 @@ define([
         'superdesk.services.modal',
         'superdesk.privileges',
         'superdesk.keyboard'
-    ]);
-
-    module.provider('superdesk', SuperdeskProvider);
+    ])
+    .constant('lodash', window._)
+    .constant('langmap', window.languageMappingList)
+    .provider('superdesk', SuperdeskProvider);
 
     module.service('activityService', ['$location', '$injector', '$q', '$timeout', 'gettext', 'modal',
     function($location, $injector, $q, $timeout, gettext, modal) {

@@ -894,11 +894,10 @@
             };
         }])
 
-        .directive('sdUserEdit', ['api', 'gettext', 'notify', 'usersService', 'userList', 'session', 'lodash',
-            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager',
-        function(api, gettext, notify, usersService, userList, session, _, $location, $route, superdesk, features,
-                 asset, privileges, desks, keyboardManager) {
-
+        .directive('sdUserEdit', ['api', 'gettext', 'notify', 'usersService', 'userList', 'session', 'lodash', 'langmap',
+            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager', 'gettextCatalog',
+        function(api, gettext, notify, usersService, userList, session, _, langmap, $location, $route, superdesk, features,
+                 asset, privileges, desks, keyboardManager, gettextCatalog) {
             return {
                 templateUrl: asset.templateUrl('superdesk-users/views/edit-form.html'),
                 scope: {
@@ -935,6 +934,12 @@
                     api('roles').query().then(function(result) {
                         scope.roles = result._items;
                     });
+                    //get available translation languages
+                    scope.languages = _.map(gettextCatalog.strings, function(translation, lang) {
+                        return {'code': lang, 'nativeName': langmap[lang].nativeName};
+                    });
+                    scope.languages.unshift(
+                        {'code': gettextCatalog.baseLanguage, 'nativeName': langmap[gettextCatalog.baseLanguage].nativeName});
 
                     scope.cancel = function() {
                         resetUser(scope.origUser);
@@ -955,7 +960,6 @@
                     scope.save = function() {
                         scope.error = null;
                         notify.info(gettext('saving..'));
-
                         return usersService.save(scope.origUser, scope.user)
                         .then(function(response) {
                             scope.origUser = response;
