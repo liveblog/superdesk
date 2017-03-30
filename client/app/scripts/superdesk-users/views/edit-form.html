@@ -105,7 +105,7 @@
                   <div ng-show="userForm.email.$error.unique || error.email.unique" sd-valid-error translate>sorry, a user with this email already exists</div>
                 </div>
 
-                <div sd-info-item class="user_type" ng-if="privileges.users">
+                <div sd-info-item class="user_type" ng-if="privileges.users && isNetworkSubscription()">
                   <label for="user_type" translate>administrator</label>
                   <input type="checkbox" ng-true-value="'administrator'" ng-false-value="'user'" ng-model="user.user_type" name="user_type" id="user_type">
                 </div>

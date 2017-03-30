@@ -895,9 +895,9 @@
         }])
 
         .directive('sdUserEdit', ['api', 'gettext', 'notify', 'usersService', 'userList', 'session', 'lodash',
-            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager',
+            '$location', '$route', 'superdesk', 'features', 'asset', 'privileges', 'desks', 'keyboardManager', 'config',
         function(api, gettext, notify, usersService, userList, session, _, $location, $route, superdesk, features,
-                 asset, privileges, desks, keyboardManager) {
+                 asset, privileges, desks, keyboardManager, config) {
 
             return {
                 templateUrl: asset.templateUrl('superdesk-users/views/edit-form.html'),
@@ -908,6 +908,7 @@
                     onupdate: '&'
                 },
                 link: function(scope, elem) {
+                  console.log('config', config);
                     scope.privileges = privileges.privileges;
                     scope.features = features;
                     scope.usernamePattern = usersService.usernamePattern;
@@ -916,6 +917,11 @@
 
                     scope.dirty = false;
                     scope.errorMessage = null;
+
+                    scope.isNetworkSubscription = function() {
+                      console.log('hi', !config.subscriptionLevel);
+                        return !config.subscriptionLevel;
+                    }
 
                     scope.$watch('origUser', resetUser);
 
