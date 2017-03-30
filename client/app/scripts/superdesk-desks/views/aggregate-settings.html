@@ -26,8 +26,8 @@
                     </li>
                 </ul>
             </div>
-            <div class="desk">
-                <div class="desk-title" translate>Personal
+            <div class="desk clearfix">
+                <div class="desk-title"><span translate>Personal</span>
                     <span sd-switch class="pull-right" ng-model="editGroups['personal'].selected" ng-click="setPersonalInfo()"></span>
                 </div>
             </div>
@@ -42,9 +42,21 @@
 
     <div sd-wizard-step data-title="{{ :: 'Saved Searches' | translate }}" data-code="searches">
         <div class="content">
-            <div class="legend" translate>Select saved searches for view.  
-                <span sd-switch class="pull-right" ng-model="showAllSavedSearches" 
-                 ng-click="initSavedSearches(showAllSavedSearches)" title="{{'Show all saved searches'}} | translate"></span>
+            <div class="legend"><span translate>Select global saved searches</span>  
+                <span sd-switch class="pull-right" ng-model="showGlobalSavedSearches" 
+                 title="{{'Show all saved searches' | translate}}"></span>
+            </div>
+            <div class="desk clearfix" ng-repeat="search in globalSavedSearches track by search._id | orderBy: 'name'" ng-if="showGlobalSavedSearches">
+                <div class="desk-title">
+                    <div>
+                        {{:: search.name}} <i>by {{:: userLookup[search.user].display_name}}</i><br />
+                        <span class="search-description">{{:: search.description}} </span>
+                    </div>
+                    <div class="switch">
+                        <span sd-switch  ng-model="editGroups[search._id].selected" ng-click="setSearchInfo(search._id)"></span>
+                    </div>
+                    
+                </div>
             </div>
             <div class="desk" ng-repeat="search in currentSavedSearches | orderBy: 'name'">
                 <div class="desk-title">
