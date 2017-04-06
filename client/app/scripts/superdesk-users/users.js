@@ -918,8 +918,8 @@
                     scope.errorMessage = null;
 
                     scope.isNetworkSubscription = function() {
-                        return !config.subscriptionLevel;
-                    }
+                        return ['solo', 'team'].indexOf(config.subscriptionLevel) != 0;
+                    };
 
                     scope.$watch('origUser', resetUser);
 
